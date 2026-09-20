@@ -1,7 +1,5 @@
 package com.example.banking.exception;
 
-
-
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -30,6 +28,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request, Map.of());
     }
 
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex,
+                                                                HttpServletRequest request) {
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request, Map.of());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex,
                                                           HttpServletRequest request) {
@@ -40,7 +44,7 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, "Validation failed", request, fieldErrors);
     }
 
-    // Broken JSON or missing request body
+    // Broken JSON, missing request body, or an unknown enum value like "accountType": "FOO"
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadableBody(HttpMessageNotReadableException ex,
                                                               HttpServletRequest request) {
@@ -50,6 +54,15 @@ public class GlobalExceptionHandler {
     // Safety net: full details go to the server log, the client gets a generic message.
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
+        // Spring's own web exceptions (missing request parameter, wrong HTTP method, unknown URL, ...)
+        // already carry the correct 4xx status. Without this they would be reported as 500.
+        if (ex instanceof org.springframework.web.ErrorResponse springError) {
+            HttpStatus status = HttpStatus.resolve(springError.getStatusCode().value());
+            if (status != null && status.is4xxClientError()) {
+                String detail = springError.getBody().getDetail();
+                return build(status, detail != null ? detail : status.getReasonPhrase(), request, Map.of());
+            }
+        }
         log.error("Unexpected error on {}", request.getRequestURI(), ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", request, Map.of());
     }
