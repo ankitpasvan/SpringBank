@@ -1,0 +1,51 @@
+### Manual API walkthrough for IntelliJ HTTP Client (contains NO secrets).
+### Run the requests top to bottom while the app is running on localhost:8080.
+
+### 1. Register a user (unique email each run)
+POST http://localhost:8080/api/auth/register
+Content-Type: application/json
+
+{"name":"Ankit","email":"ankit{{$timestamp}}@example.com","password":"SecurePassword123"}
+
+> {% client.global.set("userId", response.body.id); %}
+
+### 2. Create a savings account for that user
+POST http://localhost:8080/api/accounts
+Content-Type: application/json
+
+{"userId":"{{userId}}","accountType":"SAVINGS"}
+
+> {% client.global.set("accountId", response.body.id); %}
+
+### 3. Deposit 1000.00  -> 201, balanceAfter 1000.00
+POST http://localhost:8080/api/accounts/{{accountId}}/deposit
+Content-Type: application/json
+
+{"amount":1000.00,"description":"initial deposit"}
+
+### 4. Withdraw 300.00  -> 201, balanceAfter 700.00
+POST http://localhost:8080/api/accounts/{{accountId}}/withdraw
+Content-Type: application/json
+
+{"amount":300.00,"description":"rent"}
+
+### 5. Withdraw too much  -> 422 Insufficient funds
+POST http://localhost:8080/api/accounts/{{accountId}}/withdraw
+Content-Type: application/json
+
+{"amount":5000.00}
+
+### 6. Invalid amount  -> 400 with fieldErrors.amount
+POST http://localhost:8080/api/accounts/{{accountId}}/deposit
+Content-Type: application/json
+
+{"amount":-10}
+
+### 7. Unknown account  -> 404
+POST http://localhost:8080/api/accounts/000000000000000000000000/deposit
+Content-Type: application/json
+
+{"amount":10.00}
+
+### 8. Check the balance  -> 700.00
+GET http://localhost:8080/api/accounts/{{accountId}}
