@@ -1,10 +1,10 @@
 package com.example.banking.model;
 
-
 import java.math.BigDecimal;
 import java.time.Instant;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -13,6 +13,8 @@ import org.springframework.data.mongodb.core.mapping.Document;
  * A transaction is never updated or deleted after it is written (it is a ledger entry).
  */
 @Document(collection = "transactions")
+// Serves the history query: "all transactions of one account, newest first".
+@CompoundIndex(name = "account_created_idx", def = "{'accountId': 1, 'createdAt': -1}")
 public class Transaction {
 
     @Id
