@@ -42,6 +42,14 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.valueOf(422), ex.getMessage(), request, Map.of());
     }
 
+    // 401 = the credentials themselves are wrong (unknown email OR wrong password - same message,
+    // so this cannot be used to find out which emails are registered).
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException ex,
+                                                                  HttpServletRequest request) {
+        return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), request, Map.of());
+    }
+
     // A parameter rule is broken (page size too large, "from" after "to", ...)
     @ExceptionHandler(InvalidRequestException.class)
     public ResponseEntity<ErrorResponse> handleInvalidRequest(InvalidRequestException ex,
