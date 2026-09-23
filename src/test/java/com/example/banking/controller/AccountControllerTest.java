@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.security.Principal;
 import java.time.Instant;
 import java.util.List;
 
@@ -46,6 +47,12 @@ class AccountControllerTest {
                 .build();
     }
 
+    // Principal is a single-method interface (getName()), so a lambda is enough here -
+    // no need to pull in Spring Security types just to fake "who is calling".
+    private Principal principal(String userId) {
+        return () -> userId;
+    }
+
     private AccountResponse sampleAccount(String id, String accountNumber, AccountType type) {
         Instant now = Instant.now();
         return new AccountResponse(id, accountNumber, "user-1", type, new BigDecimal("0.00"), now, now);
@@ -56,8 +63,9 @@ class AccountControllerTest {
         when(accountService.createAccount("user-1", AccountType.SAVINGS))
                 .thenReturn(sampleAccount("acc-1", "123456789012", AccountType.SAVINGS));
 
-        mockMvc.perform(post(URL).contentType(MediaType.APPLICATION_JSON).content("""
-                {"userId":"user-1","accountType":"SAVINGS"}
+        mockMvc.perform(post(URL).principal(principal("user-1"))
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                {"accountType":"SAVINGS"}
                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value("acc-1"))
@@ -92,10 +100,10 @@ class AccountControllerTest {
     }
 
     @Test
-    void createAccount_missingFields_returns400() throws Exception {
-        mockMvc.perform(post(URL).contentType(MediaType.APPLICATION_JSON).content("{}"))
+    void createAccount_missingAccountType_returns400() throws Exception {
+        mockMvc.perform(post(URL).principal(principal("user-1"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.fieldErrors.userId").exists())
                 .andExpect(jsonPath("$.fieldErrors.accountType").exists());
 
         verifyNoInteractions(accountService);
@@ -103,8 +111,9 @@ class AccountControllerTest {
 
     @Test
     void createAccount_unknownAccountType_returns400() throws Exception {
-        mockMvc.perform(post(URL).contentType(MediaType.APPLICATION_JSON).content("""
-                {"userId":"user-1","accountType":"FOO"}
+        mockMvc.perform(post(URL).principal(principal("user-1"))
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                {"accountType":"FOO"}
                 """))
                 .andExpect(status().isBadRequest());
 
@@ -121,11 +130,14 @@ class AccountControllerTest {
 
     @Test
     void createAccount_userNotFound_returns404() throws Exception {
+        // Even a valid JWT's userId claim can point to a user that no longer exists
+        // (e.g. deleted after the token was issued but before it expired).
         when(accountService.createAccount("ghost", AccountType.SAVINGS))
                 .thenThrow(new ResourceNotFoundException("User not found with id: ghost"));
 
-        mockMvc.perform(post(URL).contentType(MediaType.APPLICATION_JSON).content("""
-                {"userId":"ghost","accountType":"SAVINGS"}
+        mockMvc.perform(post(URL).principal(principal("ghost"))
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                {"accountType":"SAVINGS"}
                 """))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))

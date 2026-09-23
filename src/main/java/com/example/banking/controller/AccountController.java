@@ -1,5 +1,6 @@
 package com.example.banking.controller;
 
+import java.security.Principal;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
@@ -30,8 +31,10 @@ public class AccountController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public AccountResponse createAccount(@Valid @RequestBody CreateAccountRequest request) {
-        return accountService.createAccount(request.userId(), request.accountType());
+    public AccountResponse createAccount(Principal principal, @Valid @RequestBody CreateAccountRequest request) {
+        // The owner is the authenticated caller (JwtAuthenticationFilter sets this as the
+        // token's userId), never a value the client could supply - see CreateAccountRequest.
+        return accountService.createAccount(principal.getName(), request.accountType());
     }
 
     @GetMapping("/{id}")
