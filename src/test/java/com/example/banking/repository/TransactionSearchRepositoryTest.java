@@ -25,6 +25,12 @@ import com.example.banking.model.Transaction;
 import com.example.banking.model.TransactionType;
 
 // Checks WHAT filter we send to MongoDB (via MongoTemplate). Does not talk to a real database.
+//
+// NOTE on the type-filter test below: Query.getQueryObject() returns the raw, UNCONVERTED
+// Criteria contents. Spring Data MongoDB only converts a Java enum to its BSON String form
+// (via MappingMongoConverter) at actual query EXECUTION time, inside the real MongoTemplate.
+// Since MongoTemplate is mocked here, that conversion never runs, so the captured filter
+// still holds the raw TransactionType enum value, not the String "DEPOSIT".
 @ExtendWith(MockitoExtension.class)
 class TransactionSearchRepositoryTest {
 
@@ -68,7 +74,7 @@ class TransactionSearchRepositoryTest {
         repository.search(ACCOUNT_ID, TransactionType.DEPOSIT, null, null, pageable);
 
         Query filter = captureCountFilter();
-        assertEquals("DEPOSIT", filter.getQueryObject().get("type"));
+        assertEquals(TransactionType.DEPOSIT, filter.getQueryObject().get("type"));
     }
 
     @Test
