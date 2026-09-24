@@ -147,12 +147,12 @@ class AccountServiceTest {
     }
 
     @Test
-    void getById_found_returnsAccount() {
+    void getById_ownerMatches_returnsAccount() {
         Account account = new Account(ACCOUNT_NUMBER, USER_ID, AccountType.CURRENT, new BigDecimal("0.00"));
         ReflectionTestUtils.setField(account, "id", "acc-1");
         when(accountRepository.findById("acc-1")).thenReturn(java.util.Optional.of(account));
 
-        AccountResponse response = accountService.getById("acc-1");
+        AccountResponse response = accountService.getById("acc-1", USER_ID);
 
         assertEquals("acc-1", response.id());
         assertEquals(ACCOUNT_NUMBER, response.accountNumber());
@@ -163,7 +163,18 @@ class AccountServiceTest {
     void getById_notFound_throwsResourceNotFound() {
         when(accountRepository.findById("missing")).thenReturn(java.util.Optional.empty());
 
-        assertThrows(ResourceNotFoundException.class, () -> accountService.getById("missing"));
+        assertThrows(ResourceNotFoundException.class, () -> accountService.getById("missing", USER_ID));
+    }
+
+    @Test
+    void getById_differentOwner_throwsResourceNotFound() {
+        // Account exists, but belongs to someone else - must look identical to "not found",
+        // never a distinct error, so account ids can't be enumerated by their HTTP status.
+        Account account = new Account(ACCOUNT_NUMBER, "someone-else", AccountType.CURRENT, new BigDecimal("0.00"));
+        ReflectionTestUtils.setField(account, "id", "acc-1");
+        when(accountRepository.findById("acc-1")).thenReturn(java.util.Optional.of(account));
+
+        assertThrows(ResourceNotFoundException.class, () -> accountService.getById("acc-1", USER_ID));
     }
 
     @Test

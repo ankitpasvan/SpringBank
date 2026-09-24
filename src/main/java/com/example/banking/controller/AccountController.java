@@ -38,8 +38,8 @@ public class AccountController {
     }
 
     @GetMapping("/{id}")
-    public AccountResponse getAccountById(@PathVariable("id") String id) {
-        return accountService.getById(id);
+    public AccountResponse getAccountById(Principal principal, @PathVariable("id") String id) {
+        return accountService.getById(id, principal.getName());
     }
 
     @GetMapping

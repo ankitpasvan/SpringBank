@@ -76,14 +76,26 @@ class AccountControllerTest {
     }
 
     @Test
-    void getAccountById_returns200() throws Exception {
-        when(accountService.getById("acc-1"))
+    void getAccountById_ownerMatches_returns200() throws Exception {
+        when(accountService.getById("acc-1", "user-1"))
                 .thenReturn(sampleAccount("acc-1", "123456789012", AccountType.CURRENT));
 
-        mockMvc.perform(get(URL + "/acc-1"))
+        mockMvc.perform(get(URL + "/acc-1").principal(principal("user-1")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("acc-1"))
                 .andExpect(jsonPath("$.accountType").value("CURRENT"));
+    }
+
+    @Test
+    void getAccountById_differentOwner_returns404() throws Exception {
+        // The controller always forwards the CALLER's own id, never the id of whoever the
+        // account actually belongs to - the service is what decides "not yours" -> 404.
+        when(accountService.getById("acc-1", "someone-else"))
+                .thenThrow(new ResourceNotFoundException("Account not found with id: acc-1"));
+
+        mockMvc.perform(get(URL + "/acc-1").principal(principal("someone-else")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Account not found with id: acc-1"));
     }
 
     @Test
@@ -146,10 +158,10 @@ class AccountControllerTest {
 
     @Test
     void getAccountById_notFound_returns404() throws Exception {
-        when(accountService.getById("missing"))
+        when(accountService.getById("missing", "user-1"))
                 .thenThrow(new ResourceNotFoundException("Account not found with id: missing"));
 
-        mockMvc.perform(get(URL + "/missing"))
+        mockMvc.perform(get(URL + "/missing").principal(principal("user-1")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Account not found with id: missing"));
     }
