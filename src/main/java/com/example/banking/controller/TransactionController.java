@@ -1,5 +1,6 @@
 package com.example.banking.controller;
 
+import java.security.Principal;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,15 +28,15 @@ public class TransactionController {
 
     @PostMapping("/deposit")
     @ResponseStatus(HttpStatus.CREATED)
-    public TransactionResponse deposit(@PathVariable("accountId") String accountId,
+    public TransactionResponse deposit(Principal principal, @PathVariable("accountId") String accountId,
                                        @Valid @RequestBody TransactionRequest request) {
-        return transactionService.deposit(accountId, request.amount(), request.description());
+        return transactionService.deposit(accountId, principal.getName(), request.amount(), request.description());
     }
 
     @PostMapping("/withdraw")
     @ResponseStatus(HttpStatus.CREATED)
-    public TransactionResponse withdraw(@PathVariable("accountId") String accountId,
+    public TransactionResponse withdraw(Principal principal, @PathVariable("accountId") String accountId,
                                         @Valid @RequestBody TransactionRequest request) {
-        return transactionService.withdraw(accountId, request.amount(), request.description());
+        return transactionService.withdraw(accountId, principal.getName(), request.amount(), request.description());
     }
 }

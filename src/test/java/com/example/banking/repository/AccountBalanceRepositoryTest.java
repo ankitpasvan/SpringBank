@@ -1,6 +1,5 @@
 package com.example.banking.repository;
 
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -33,13 +32,15 @@ import com.example.banking.model.AccountType;
 @ExtendWith(MockitoExtension.class)
 class AccountBalanceRepositoryTest {
 
+    private static final String USER_ID = "user-1";
+
     @Mock
     private MongoTemplate mongoTemplate;
 
     private AccountBalanceRepository repository;
 
     private final Account updated =
-            new Account("123456789012", "user-1", AccountType.SAVINGS, new BigDecimal("900.00"));
+            new Account("123456789012", USER_ID, AccountType.SAVINGS, new BigDecimal("900.00"));
 
     @BeforeEach
     void setUp() {
@@ -64,14 +65,15 @@ class AccountBalanceRepositoryTest {
     }
 
     @Test
-    void withdraw_filtersOnSufficientBalance_andDecrementsAtomically() {
+    void withdraw_filtersOnOwnerAndSufficientBalance_andDecrementsAtomically() {
         stubTemplate(updated);
 
-        Optional<Account> result = repository.withdraw("acc-1", new BigDecimal("100.00"));
+        Optional<Account> result = repository.withdraw("acc-1", USER_ID, new BigDecimal("100.00"));
 
         assertTrue(result.isPresent());
         captureRequest();
         assertEquals("acc-1", capturedFilter.get("id"));
+        assertEquals(USER_ID, capturedFilter.get("userId"));
         Map<?, ?> balanceCondition = (Map<?, ?>) capturedFilter.get("balance");
         assertNotNull(balanceCondition, "withdraw must guard with balance >= amount");
         assertEquals(new BigDecimal("100.00"), balanceCondition.get("$gte"));
@@ -80,14 +82,15 @@ class AccountBalanceRepositoryTest {
     }
 
     @Test
-    void deposit_hasNoBalanceCondition_andIncrementsAtomically() {
+    void deposit_filtersOnOwner_hasNoBalanceCondition_andIncrementsAtomically() {
         stubTemplate(updated);
 
-        Optional<Account> result = repository.deposit("acc-1", new BigDecimal("100.00"));
+        Optional<Account> result = repository.deposit("acc-1", USER_ID, new BigDecimal("100.00"));
 
         assertTrue(result.isPresent());
         captureRequest();
         assertEquals("acc-1", capturedFilter.get("id"));
+        assertEquals(USER_ID, capturedFilter.get("userId"));
         assertFalse(capturedFilter.containsKey("balance"));
         Map<?, ?> inc = (Map<?, ?>) capturedUpdate.get("$inc");
         assertEquals(new BigDecimal("100.00"), inc.get("balance"));
@@ -97,6 +100,15 @@ class AccountBalanceRepositoryTest {
     void withdraw_nothingMatched_returnsEmpty() {
         stubTemplate(null);
 
-        assertTrue(repository.withdraw("acc-1", new BigDecimal("100.00")).isEmpty());
+        assertTrue(repository.withdraw("acc-1", USER_ID, new BigDecimal("100.00")).isEmpty());
+    }
+
+    @Test
+    void deposit_nothingMatched_returnsEmpty() {
+        // Covers both "no such account" and "account exists but belongs to someone else" -
+        // the caller can't tell these apart from this result alone (see TransactionService).
+        stubTemplate(null);
+
+        assertTrue(repository.deposit("acc-1", USER_ID, new BigDecimal("100.00")).isEmpty());
     }
 }

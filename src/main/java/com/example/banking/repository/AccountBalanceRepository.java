@@ -1,6 +1,5 @@
 package com.example.banking.repository;
 
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
@@ -20,6 +19,10 @@ import com.example.banking.model.Account;
  * Why not "read account, change balance in Java, save"? Two requests at the same moment
  * would both read the old balance and one update would be lost (race condition).
  * With $inc the database itself does the arithmetic, so no update can be lost.
+ *
+ * The ownership check (userId) is folded into the SAME atomic filter as the id/balance
+ * check, rather than done as a separate read beforehand - a caller can never observe or
+ * race against "is this mine" as a distinct step.
  */
 @Repository
 public class AccountBalanceRepository {
@@ -30,19 +33,25 @@ public class AccountBalanceRepository {
         this.mongoTemplate = mongoTemplate;
     }
 
-    /** Adds the amount. Returns the updated account, or empty if the account does not exist. */
-    public Optional<Account> deposit(String accountId, BigDecimal amount) {
-        Query query = Query.query(Criteria.where("id").is(accountId));
+    /**
+     * Adds the amount. Returns the updated account, or empty if no account with this id
+     * AND this owner exists.
+     */
+    public Optional<Account> deposit(String accountId, String userId, BigDecimal amount) {
+        Query query = Query.query(Criteria.where("id").is(accountId).and("userId").is(userId));
         return applyBalanceChange(query, amount);
     }
 
     /**
-     * Subtracts the amount ONLY IF balance >= amount (the check and the update are one atomic step,
-     * so the balance can never go negative). Returns empty if the account does not exist
-     * OR the balance is too low.
+     * Subtracts the amount ONLY IF the account belongs to userId AND balance >= amount (the
+     * ownership check, the balance check and the update are all one atomic step, so the
+     * balance can never go negative and ownership can never be bypassed by a race).
+     * Returns empty if the account does not exist, is not owned by userId, or has too
+     * little balance.
      */
-    public Optional<Account> withdraw(String accountId, BigDecimal amount) {
-        Query query = Query.query(Criteria.where("id").is(accountId).and("balance").gte(amount));
+    public Optional<Account> withdraw(String accountId, String userId, BigDecimal amount) {
+        Query query = Query.query(Criteria.where("id").is(accountId).and("userId").is(userId)
+                .and("balance").gte(amount));
         return applyBalanceChange(query, amount.negate());
     }
 

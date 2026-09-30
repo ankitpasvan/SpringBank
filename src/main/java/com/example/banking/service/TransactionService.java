@@ -36,22 +36,25 @@ public class TransactionService {
         this.transactionRepository = transactionRepository;
     }
 
-    public TransactionResponse deposit(String accountId, BigDecimal amount, String description) {
+    public TransactionResponse deposit(String accountId, String userId, BigDecimal amount, String description) {
         BigDecimal money = normalize(amount);
 
-        Account updated = accountBalanceRepository.deposit(accountId, money)
+        // Empty result covers BOTH "no such account" and "account exists but isn't yours" -
+        // both are reported as the same "not found" (see AccountBalanceRepository).
+        Account updated = accountBalanceRepository.deposit(accountId, userId, money)
                 .orElseThrow(() -> accountNotFound(accountId));
 
         return recordTransaction(accountId, TransactionType.DEPOSIT, money, updated, description);
     }
 
-    public TransactionResponse withdraw(String accountId, BigDecimal amount, String description) {
+    public TransactionResponse withdraw(String accountId, String userId, BigDecimal amount, String description) {
         BigDecimal money = normalize(amount);
 
-        Optional<Account> updated = accountBalanceRepository.withdraw(accountId, money);
+        Optional<Account> updated = accountBalanceRepository.withdraw(accountId, userId, money);
         if (updated.isEmpty()) {
-            // The atomic update matched nothing: either no such account, or balance < amount.
-            if (!accountRepository.existsById(accountId)) {
+            // The atomic update matched nothing: either no such account, the account isn't
+            // yours, or balance < amount. Only the last case is "insufficient funds".
+            if (!accountRepository.existsByIdAndUserId(accountId, userId)) {
                 throw accountNotFound(accountId);
             }
             log.info("Withdrawal rejected for account id={}: insufficient funds", accountId);

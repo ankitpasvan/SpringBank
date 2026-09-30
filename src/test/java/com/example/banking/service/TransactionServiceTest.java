@@ -1,6 +1,5 @@
 package com.example.banking.service;
 
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,6 +33,7 @@ import com.example.banking.repository.TransactionRepository;
 class TransactionServiceTest {
 
     private static final String ACCOUNT_ID = "acc-1";
+    private static final String USER_ID = "user-1";
 
     @Mock
     private AccountBalanceRepository accountBalanceRepository;
@@ -53,7 +53,7 @@ class TransactionServiceTest {
     }
 
     private Account accountWithBalance(String balance) {
-        return new Account("123456789012", "user-1", AccountType.SAVINGS, new BigDecimal(balance));
+        return new Account("123456789012", USER_ID, AccountType.SAVINGS, new BigDecimal(balance));
     }
 
     private void assertMoney(String expected, BigDecimal actual) {
@@ -63,11 +63,12 @@ class TransactionServiceTest {
 
     @Test
     void deposit_success_recordsTransactionWithBalanceAfter() {
-        when(accountBalanceRepository.deposit(ACCOUNT_ID, new BigDecimal("500.00")))
+        when(accountBalanceRepository.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00")))
                 .thenReturn(Optional.of(accountWithBalance("1500.00")));
         when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        TransactionResponse response = transactionService.deposit(ACCOUNT_ID, new BigDecimal("500.00"), "salary");
+        TransactionResponse response =
+                transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00"), "salary");
 
         assertEquals(TransactionType.DEPOSIT, response.type());
         assertEquals(ACCOUNT_ID, response.accountId());
@@ -78,11 +79,11 @@ class TransactionServiceTest {
 
     @Test
     void deposit_amountWithoutDecimals_isNormalizedToTwoDecimals() {
-        when(accountBalanceRepository.deposit(ACCOUNT_ID, new BigDecimal("100.00")))
+        when(accountBalanceRepository.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("100.00")))
                 .thenReturn(Optional.of(accountWithBalance("100.00")));
         when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        transactionService.deposit(ACCOUNT_ID, new BigDecimal("100"), null);
+        transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("100"), null);
 
         ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
         verify(transactionRepository).save(captor.capture());
@@ -91,21 +92,36 @@ class TransactionServiceTest {
 
     @Test
     void deposit_accountNotFound_throwsAndRecordsNothing() {
-        when(accountBalanceRepository.deposit(ACCOUNT_ID, new BigDecimal("50.00"))).thenReturn(Optional.empty());
+        when(accountBalanceRepository.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("50.00")))
+                .thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class,
-                () -> transactionService.deposit(ACCOUNT_ID, new BigDecimal("50.00"), null));
+                () -> transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("50.00"), null));
+
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void deposit_differentOwner_throwsResourceNotFound() {
+        // The atomic query in AccountBalanceRepository matches nothing for a non-owner,
+        // which looks identical to "account doesn't exist" here.
+        when(accountBalanceRepository.deposit(ACCOUNT_ID, "someone-else", new BigDecimal("50.00")))
+                .thenReturn(Optional.empty());
+
+        assertThrows(ResourceNotFoundException.class,
+                () -> transactionService.deposit(ACCOUNT_ID, "someone-else", new BigDecimal("50.00"), null));
 
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
 
     @Test
     void withdraw_success_recordsWithdrawalTransaction() {
-        when(accountBalanceRepository.withdraw(ACCOUNT_ID, new BigDecimal("200.00")))
+        when(accountBalanceRepository.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("200.00")))
                 .thenReturn(Optional.of(accountWithBalance("800.00")));
         when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        TransactionResponse response = transactionService.withdraw(ACCOUNT_ID, new BigDecimal("200.00"), "rent");
+        TransactionResponse response =
+                transactionService.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("200.00"), "rent");
 
         assertEquals(TransactionType.WITHDRAWAL, response.type());
         assertMoney("200.00", response.amount());
@@ -114,22 +130,40 @@ class TransactionServiceTest {
 
     @Test
     void withdraw_insufficientFunds_throwsAndRecordsNothing() {
-        when(accountBalanceRepository.withdraw(ACCOUNT_ID, new BigDecimal("999.00"))).thenReturn(Optional.empty());
-        when(accountRepository.existsById(ACCOUNT_ID)).thenReturn(true);
+        when(accountBalanceRepository.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("999.00")))
+                .thenReturn(Optional.empty());
+        when(accountRepository.existsByIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(true);
 
         assertThrows(InsufficientFundsException.class,
-                () -> transactionService.withdraw(ACCOUNT_ID, new BigDecimal("999.00"), null));
+                () -> transactionService.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("999.00"), null));
 
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
 
     @Test
     void withdraw_accountNotFound_throwsResourceNotFound() {
-        when(accountBalanceRepository.withdraw(ACCOUNT_ID, new BigDecimal("10.00"))).thenReturn(Optional.empty());
-        when(accountRepository.existsById(ACCOUNT_ID)).thenReturn(false);
+        when(accountBalanceRepository.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("10.00")))
+                .thenReturn(Optional.empty());
+        when(accountRepository.existsByIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(false);
 
         assertThrows(ResourceNotFoundException.class,
-                () -> transactionService.withdraw(ACCOUNT_ID, new BigDecimal("10.00"), null));
+                () -> transactionService.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("10.00"), null));
+
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void withdraw_differentOwner_throwsResourceNotFound_notInsufficientFunds() {
+        // Account exists and has enough balance, but belongs to someone else: the atomic
+        // filter still matches nothing, and existsByIdAndUserId(accountId, caller) is also
+        // false (the account isn't the caller's), so this must be "not found", never a
+        // balance-related error.
+        when(accountBalanceRepository.withdraw(ACCOUNT_ID, "someone-else", new BigDecimal("10.00")))
+                .thenReturn(Optional.empty());
+        when(accountRepository.existsByIdAndUserId(ACCOUNT_ID, "someone-else")).thenReturn(false);
+
+        assertThrows(ResourceNotFoundException.class,
+                () -> transactionService.withdraw(ACCOUNT_ID, "someone-else", new BigDecimal("10.00"), null));
 
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -137,11 +171,11 @@ class TransactionServiceTest {
     @Test
     void depositAndWithdraw_nonPositiveAmount_isRejectedBeforeTouchingTheDatabase() {
         assertThrows(IllegalArgumentException.class,
-                () -> transactionService.deposit(ACCOUNT_ID, BigDecimal.ZERO, null));
+                () -> transactionService.deposit(ACCOUNT_ID, USER_ID, BigDecimal.ZERO, null));
         assertThrows(IllegalArgumentException.class,
-                () -> transactionService.withdraw(ACCOUNT_ID, new BigDecimal("-5.00"), null));
+                () -> transactionService.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("-5.00"), null));
         assertThrows(IllegalArgumentException.class,
-                () -> transactionService.deposit(ACCOUNT_ID, null, null));
+                () -> transactionService.deposit(ACCOUNT_ID, USER_ID, null, null));
 
         verifyNoInteractions(accountBalanceRepository, accountRepository, transactionRepository);
     }
