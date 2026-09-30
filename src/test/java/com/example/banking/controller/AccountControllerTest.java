@@ -99,16 +99,29 @@ class AccountControllerTest {
     }
 
     @Test
-    void getAccountsByUserId_returns200_withList() throws Exception {
+    void getAccountsByUserId_returns200_withCallersOwnList() throws Exception {
         when(accountService.getByUserId("user-1")).thenReturn(List.of(
                 sampleAccount("acc-1", "111111111111", AccountType.SAVINGS),
                 sampleAccount("acc-2", "222222222222", AccountType.CURRENT)));
 
-        mockMvc.perform(get(URL).param("userId", "user-1"))
+        mockMvc.perform(get(URL).principal(principal("user-1")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].accountNumber").value("111111111111"))
                 .andExpect(jsonPath("$[1].accountNumber").value("222222222222"));
+    }
+
+    @Test
+    void getAccountsByUserId_alwaysUsesTheAuthenticatedCallersOwnId() throws Exception {
+        // There is no userId parameter anymore for a client to set to someone else's id -
+        // whatever the principal's name is, is the only input this endpoint uses.
+        when(accountService.getByUserId("someone-else")).thenReturn(List.of(
+                sampleAccount("acc-9", "999999999999", AccountType.SAVINGS)));
+
+        mockMvc.perform(get(URL).principal(principal("someone-else")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].accountNumber").value("999999999999"));
     }
 
     @Test
@@ -127,14 +140,6 @@ class AccountControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content("""
                 {"accountType":"FOO"}
                 """))
-                .andExpect(status().isBadRequest());
-
-        verifyNoInteractions(accountService);
-    }
-
-    @Test
-    void getAccountsByUserId_missingUserIdParam_returns400() throws Exception {
-        mockMvc.perform(get(URL))
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(accountService);

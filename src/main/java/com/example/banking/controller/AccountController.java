@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -43,7 +42,9 @@ public class AccountController {
     }
 
     @GetMapping
-    public List<AccountResponse> getAccountsByUserId(@RequestParam("userId") String userId) {
-        return accountService.getByUserId(userId);
+    public List<AccountResponse> getAccountsByUserId(Principal principal) {
+        // Always the caller's own accounts - "userId" is no longer a query parameter a
+        // client could set to someone else's id (see the removed @RequestParam).
+        return accountService.getByUserId(principal.getName());
     }
 }
