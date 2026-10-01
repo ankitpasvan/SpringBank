@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.security.Principal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -47,19 +48,25 @@ class TransactionHistoryControllerTest {
                 .build();
     }
 
+    // Principal is a single-method interface (getName()), so a lambda is enough here -
+    // no need to pull in Spring Security types just to fake "who is calling".
+    private Principal principal(String userId) {
+        return () -> userId;
+    }
+
     private TransactionResponse sampleTx(TransactionType type) {
         return new TransactionResponse("tx-1", "acc-1", type, new BigDecimal("100.00"),
                 new BigDecimal("100.00"), "note", java.time.Instant.now());
     }
 
     @Test
-    void getHistory_noFilters_returns200WithPagination() throws Exception {
+    void getHistory_ownerMatches_returns200WithPagination() throws Exception {
         PageResponse<TransactionResponse> page = new PageResponse<>(
                 List.of(sampleTx(TransactionType.DEPOSIT), sampleTx(TransactionType.WITHDRAWAL)), 0, 20, 2, 1);
-        when(transactionHistoryService.getHistory(eq("acc-1"), isNull(), isNull(), isNull(), eq(0), eq(20)))
-                .thenReturn(page);
+        when(transactionHistoryService.getHistory(eq("acc-1"), eq("user-1"), isNull(), isNull(), isNull(),
+                eq(0), eq(20))).thenReturn(page);
 
-        mockMvc.perform(get(URL))
+        mockMvc.perform(get(URL).principal(principal("user-1")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(2)))
                 .andExpect(jsonPath("$.page").value(0))
@@ -70,11 +77,11 @@ class TransactionHistoryControllerTest {
 
     @Test
     void getHistory_withTypeFilter_passesTypeToService() throws Exception {
-        when(transactionHistoryService.getHistory(eq("acc-1"), eq(TransactionType.DEPOSIT), isNull(), isNull(),
-                eq(0), eq(20)))
+        when(transactionHistoryService.getHistory(eq("acc-1"), eq("user-1"), eq(TransactionType.DEPOSIT),
+                isNull(), isNull(), eq(0), eq(20)))
                 .thenReturn(new PageResponse<>(List.of(sampleTx(TransactionType.DEPOSIT)), 0, 20, 1, 1));
 
-        mockMvc.perform(get(URL).param("type", "DEPOSIT"))
+        mockMvc.perform(get(URL).principal(principal("user-1")).param("type", "DEPOSIT"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(1)))
                 .andExpect(jsonPath("$.content[0].type").value("DEPOSIT"));
@@ -82,11 +89,11 @@ class TransactionHistoryControllerTest {
 
     @Test
     void getHistory_withDateRangeAndPaging_passesValuesToService() throws Exception {
-        when(transactionHistoryService.getHistory(eq("acc-1"), isNull(),
+        when(transactionHistoryService.getHistory(eq("acc-1"), eq("user-1"), isNull(),
                 eq(LocalDate.of(2026, 1, 1)), eq(LocalDate.of(2026, 1, 31)), eq(1), eq(5)))
                 .thenReturn(new PageResponse<>(List.of(), 1, 5, 0, 0));
 
-        mockMvc.perform(get(URL)
+        mockMvc.perform(get(URL).principal(principal("user-1"))
                         .param("from", "2026-01-01")
                         .param("to", "2026-01-31")
                         .param("page", "1")
@@ -98,32 +105,45 @@ class TransactionHistoryControllerTest {
 
     @Test
     void getHistory_invalidTypeValue_returns400() throws Exception {
-        mockMvc.perform(get(URL).param("type", "NOT_A_TYPE"))
+        mockMvc.perform(get(URL).principal(principal("user-1")).param("type", "NOT_A_TYPE"))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     void getHistory_invalidDateValue_returns400() throws Exception {
-        mockMvc.perform(get(URL).param("from", "not-a-date"))
+        mockMvc.perform(get(URL).principal(principal("user-1")).param("from", "not-a-date"))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     void getHistory_invalidPageSize_returns400() throws Exception {
-        when(transactionHistoryService.getHistory(eq("acc-1"), isNull(), isNull(), isNull(), eq(0), eq(500)))
+        when(transactionHistoryService.getHistory(eq("acc-1"), eq("user-1"), isNull(), isNull(), isNull(),
+                eq(0), eq(500)))
                 .thenThrow(new InvalidRequestException("Page size must be between 1 and 100"));
 
-        mockMvc.perform(get(URL).param("size", "500"))
+        mockMvc.perform(get(URL).principal(principal("user-1")).param("size", "500"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Page size must be between 1 and 100"));
     }
 
     @Test
     void getHistory_accountNotFound_returns404() throws Exception {
-        when(transactionHistoryService.getHistory(eq("acc-1"), isNull(), isNull(), isNull(), eq(0), eq(20)))
+        when(transactionHistoryService.getHistory(eq("acc-1"), eq("user-1"), isNull(), isNull(), isNull(),
+                eq(0), eq(20)))
                 .thenThrow(new ResourceNotFoundException("Account not found with id: acc-1"));
 
-        mockMvc.perform(get(URL))
+        mockMvc.perform(get(URL).principal(principal("user-1")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Account not found with id: acc-1"));
+    }
+
+    @Test
+    void getHistory_differentOwner_returns404() throws Exception {
+        when(transactionHistoryService.getHistory(eq("acc-1"), eq("someone-else"), isNull(), isNull(), isNull(),
+                eq(0), eq(20)))
+                .thenThrow(new ResourceNotFoundException("Account not found with id: acc-1"));
+
+        mockMvc.perform(get(URL).principal(principal("someone-else")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Account not found with id: acc-1"));
     }

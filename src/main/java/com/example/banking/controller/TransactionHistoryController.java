@@ -1,5 +1,6 @@
 package com.example.banking.controller;
 
+import java.security.Principal;
 import java.time.LocalDate;
 
 import org.springframework.format.annotation.DateTimeFormat;
@@ -26,6 +27,7 @@ public class TransactionHistoryController {
 
     @GetMapping
     public PageResponse<TransactionResponse> getHistory(
+            Principal principal,
             @PathVariable("accountId") String accountId,
             @RequestParam(name = "type", required = false) TransactionType type,
             @RequestParam(name = "from", required = false)
@@ -34,6 +36,6 @@ public class TransactionHistoryController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(name = "page", defaultValue = "0") int page,
             @RequestParam(name = "size", defaultValue = "20") int size) {
-        return transactionHistoryService.getHistory(accountId, type, from, to, page, size);
+        return transactionHistoryService.getHistory(accountId, principal.getName(), type, from, to, page, size);
     }
 }

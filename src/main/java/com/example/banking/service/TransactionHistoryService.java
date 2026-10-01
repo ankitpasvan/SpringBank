@@ -37,7 +37,7 @@ public class TransactionHistoryService {
      * Newest transactions first. Dates are calendar days in UTC: "from" is inclusive from 00:00,
      * "to" is inclusive until the end of that day.
      */
-    public PageResponse<TransactionResponse> getHistory(String accountId, TransactionType type,
+    public PageResponse<TransactionResponse> getHistory(String accountId, String userId, TransactionType type,
                                                         LocalDate from, LocalDate to, int page, int size) {
         if (page < 0) {
             throw new InvalidRequestException("Page index must not be negative");
@@ -48,7 +48,9 @@ public class TransactionHistoryService {
         if (from != null && to != null && from.isAfter(to)) {
             throw new InvalidRequestException("'from' date must not be after 'to' date");
         }
-        if (!accountRepository.existsById(accountId)) {
+        // Covers BOTH "no such account" and "account exists but isn't yours" - reported
+        // identically, so an account id's existence can't be discovered via this endpoint.
+        if (!accountRepository.existsByIdAndUserId(accountId, userId)) {
             throw new ResourceNotFoundException("Account not found with id: " + accountId);
         }
 
