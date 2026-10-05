@@ -112,3 +112,52 @@ Authorization: Bearer {{tokenA}}
 Content-Type: application/json
 
 {"amount":10.00}
+
+### ===== MONEY TRANSFER =====
+### IMPORTANT: a transfer runs inside a MongoDB multi-document transaction
+### (@Transactional + MongoTransactionManager, see MongoTransactionConfig.java).
+### Multi-document transactions require a REPLICA SET - they do NOT work against a
+### single standalone mongod. The real atomicity/rollback guarantee (if the deposit
+### step were to fail, the earlier withdraw must be undone) can only be observed when
+### this app is connected to MongoDB Atlas (a replica set by default) or to a local
+### MongoDB that was itself started with a replica set. Against a plain standalone
+### local mongod, these requests may fail outright with a transaction-not-supported
+### error - that is expected and is a MongoDB limitation, not an application bug.
+
+### 18. User B needs their own account to receive money
+POST http://localhost:8080/api/accounts
+Authorization: Bearer {{tokenB}}
+Content-Type: application/json
+
+{"accountType":"SAVINGS"}
+
+> {% client.global.set("accountIdB", response.body.id); %}
+
+### 19. User A transfers 200.00 to user B -> 201, senderBalanceAfter 500.00
+###     (account A had 700.00 after request #6/#7/#8 above: 700.00 - 200.00 = 500.00)
+POST http://localhost:8080/api/accounts/{{accountIdA}}/transfer
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{"toAccountId":"{{accountIdB}}","amount":200.00,"description":"splitting dinner"}
+
+### 20. Self-transfer (same account on both sides) -> 400
+POST http://localhost:8080/api/accounts/{{accountIdA}}/transfer
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{"toAccountId":"{{accountIdA}}","amount":10.00}
+
+### 21. Transfer to a non-existent account -> 404 (the sender's balance must not move)
+POST http://localhost:8080/api/accounts/{{accountIdA}}/transfer
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{"toAccountId":"000000000000000000000000","amount":10.00}
+
+### 22. Transfer more than the sender's balance -> 422 Insufficient funds
+POST http://localhost:8080/api/accounts/{{accountIdA}}/transfer
+Authorization: Bearer {{tokenA}}
+Content-Type: application/json
+
+{"toAccountId":"{{accountIdB}}","amount":999999.00}
