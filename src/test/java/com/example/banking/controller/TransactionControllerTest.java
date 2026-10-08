@@ -2,6 +2,7 @@ package com.example.banking.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -23,6 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.example.banking.dto.TransactionResponse;
 import com.example.banking.exception.GlobalExceptionHandler;
+import com.example.banking.exception.IdempotencyInProgressException;
 import com.example.banking.exception.InsufficientFundsException;
 import com.example.banking.exception.ResourceNotFoundException;
 import com.example.banking.model.TransactionType;
@@ -64,8 +66,8 @@ class TransactionControllerTest {
     }
 
     @Test
-    void deposit_validRequest_returns201_andForwardsAuthenticatedUserIdToService() throws Exception {
-        when(transactionService.deposit("acc-1", "user-1", new BigDecimal("500.00"), "salary"))
+    void deposit_validRequest_returns201() throws Exception {
+        when(transactionService.deposit("acc-1", "user-1", new BigDecimal("500.00"), "salary", null))
                 .thenReturn(sampleResponse(TransactionType.DEPOSIT, "500.00", "1500.00"));
 
         mockMvc.perform(post(DEPOSIT_URL).principal(principal("user-1"))
@@ -81,8 +83,8 @@ class TransactionControllerTest {
     }
 
     @Test
-    void withdraw_validRequest_returns201_andForwardsAuthenticatedUserIdToService() throws Exception {
-        when(transactionService.withdraw(eq("acc-1"), eq("user-1"), any(BigDecimal.class), any()))
+    void withdraw_validRequest_returns201() throws Exception {
+        when(transactionService.withdraw(eq("acc-1"), eq("user-1"), any(BigDecimal.class), any(), isNull()))
                 .thenReturn(sampleResponse(TransactionType.WITHDRAWAL, "200.00", "800.00"));
 
         mockMvc.perform(post(WITHDRAW_URL).principal(principal("user-1"))
@@ -165,7 +167,7 @@ class TransactionControllerTest {
 
     @Test
     void withdraw_insufficientFunds_returns422() throws Exception {
-        when(transactionService.withdraw(eq("acc-1"), eq("user-1"), any(BigDecimal.class), any()))
+        when(transactionService.withdraw(eq("acc-1"), eq("user-1"), any(BigDecimal.class), any(), isNull()))
                 .thenThrow(new InsufficientFundsException());
 
         mockMvc.perform(post(WITHDRAW_URL).principal(principal("user-1"))
@@ -177,7 +179,7 @@ class TransactionControllerTest {
 
     @Test
     void deposit_accountNotFound_returns404() throws Exception {
-        when(transactionService.deposit(eq("acc-1"), eq("user-1"), any(BigDecimal.class), any()))
+        when(transactionService.deposit(eq("acc-1"), eq("user-1"), any(BigDecimal.class), any(), isNull()))
                 .thenThrow(new ResourceNotFoundException("Account not found with id: acc-1"));
 
         mockMvc.perform(post(DEPOSIT_URL).principal(principal("user-1"))
@@ -190,7 +192,7 @@ class TransactionControllerTest {
     void deposit_differentOwner_returns404() throws Exception {
         // "someone-else" is authenticated (a valid token), but does not own "acc-1" - the
         // controller still forwards their own true id, and the service reports "not found".
-        when(transactionService.deposit(eq("acc-1"), eq("someone-else"), any(BigDecimal.class), any()))
+        when(transactionService.deposit(eq("acc-1"), eq("someone-else"), any(BigDecimal.class), any(), isNull()))
                 .thenThrow(new ResourceNotFoundException("Account not found with id: acc-1"));
 
         mockMvc.perform(post(DEPOSIT_URL).principal(principal("someone-else"))
@@ -201,12 +203,42 @@ class TransactionControllerTest {
 
     @Test
     void withdraw_differentOwner_returns404() throws Exception {
-        when(transactionService.withdraw(eq("acc-1"), eq("someone-else"), any(BigDecimal.class), any()))
+        when(transactionService.withdraw(eq("acc-1"), eq("someone-else"), any(BigDecimal.class), any(), isNull()))
                 .thenThrow(new ResourceNotFoundException("Account not found with id: acc-1"));
 
         mockMvc.perform(post(WITHDRAW_URL).principal(principal("someone-else"))
                         .contentType(MediaType.APPLICATION_JSON).content(body("10.00")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Account not found with id: acc-1"));
+    }
+
+    // ---------- idempotency ----------
+
+    @Test
+    void deposit_withIdempotencyKeyHeader_forwardsItToService() throws Exception {
+        when(transactionService.deposit("acc-1", "user-1", new BigDecimal("500.00"), "salary", "key-abc"))
+                .thenReturn(sampleResponse(TransactionType.DEPOSIT, "500.00", "1500.00"));
+
+        mockMvc.perform(post(DEPOSIT_URL).principal(principal("user-1"))
+                        .header("Idempotency-Key", "key-abc")
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                {"amount":500.00,"description":"salary"}
+                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.type").value("DEPOSIT"));
+    }
+
+    @Test
+    void deposit_idempotencyKeyInProgress_returns409() throws Exception {
+        when(transactionService.deposit(eq("acc-1"), eq("user-1"), any(BigDecimal.class), any(), eq("key-abc")))
+                .thenThrow(new IdempotencyInProgressException());
+
+        mockMvc.perform(post(DEPOSIT_URL).principal(principal("user-1"))
+                        .header("Idempotency-Key", "key-abc")
+                        .contentType(MediaType.APPLICATION_JSON).content(body("10.00")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.message")
+                        .value("A request with this idempotency key is already being processed"));
     }
 }

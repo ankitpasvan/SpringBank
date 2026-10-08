@@ -29,6 +29,15 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request, Map.of());
     }
 
+    // 409 = a request with this idempotency key is still being processed by an earlier
+    // attempt - the client must not be told to execute again, and must not be silently
+    // executed a second time either.
+    @ExceptionHandler(IdempotencyInProgressException.class)
+    public ResponseEntity<ErrorResponse> handleIdempotencyInProgress(IdempotencyInProgressException ex,
+                                                                     HttpServletRequest request) {
+        return build(HttpStatus.CONFLICT, ex.getMessage(), request, Map.of());
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex,
                                                                 HttpServletRequest request) {
