@@ -75,6 +75,16 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- OpenAPI / Swagger documentation (3.x line supports Spring Boot 4.x).
+		     If this dependency ever breaks the build, remove it together with
+		     src/main/java/com/example/banking/config/OpenApiConfig.java - the app
+		     works fine without it. -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+			<version>3.1.1</version>
+		</dependency>
+
 		<!-- Development tools -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

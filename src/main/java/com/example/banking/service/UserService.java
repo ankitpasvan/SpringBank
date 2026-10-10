@@ -1,5 +1,6 @@
 package com.example.banking.service;
 
+import java.time.Instant;
 import java.util.Locale;
 
 import org.slf4j.Logger;
@@ -12,6 +13,7 @@ import com.example.banking.dto.RegisterRequest;
 import com.example.banking.dto.UserResponse;
 import com.example.banking.exception.DuplicateEmailException;
 import com.example.banking.exception.InvalidCredentialsException;
+import com.example.banking.exception.ResourceNotFoundException;
 import com.example.banking.model.User;
 import com.example.banking.repository.UserRepository;
 
@@ -77,6 +79,32 @@ public class UserService {
 
         log.info("Login succeeded for id={}", user.getId());
         return UserResponse.from(user);
+    }
+
+    /**
+     * Returns the profile of the currently authenticated user.
+     * The userId always comes from the JWT, never from a client-supplied parameter,
+     * so a user can only ever see their own profile.
+     */
+    public UserResponse getProfile(String userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+        return UserResponse.from(user);
+    }
+
+    /**
+     * Updates the profile of the currently authenticated user.
+     * Only the name can be changed here (email changes and password changes are
+     * deliberately out of scope for this basic endpoint).
+     */
+    public UserResponse updateProfile(String userId, String name) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+        user.setName(name.trim());
+        user.setUpdatedAt(Instant.now());
+        User saved = userRepository.save(user);
+        log.info("Profile updated for id={}", userId);
+        return UserResponse.from(saved);
     }
 
     // A pre-computed BCrypt hash of a random value. It matches no real password;
