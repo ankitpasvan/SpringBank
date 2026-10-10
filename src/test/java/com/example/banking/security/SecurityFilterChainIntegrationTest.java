@@ -34,8 +34,10 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+
 @TestPropertySource(properties = {
-        "jwt.secret=XzloAJfJIyp5Fr8WTUAtBHO0xC00qWr7Hzumm+cijHw="
+        "jwt.secret=XzloAJfJIyp5Fr8WTUAtBHO0xC00qWr7Hzumm+cijHw=",
+        "jwt.expiration-ms=3600000"
 })
 class SecurityFilterChainIntegrationTest {
 
