@@ -24,14 +24,14 @@ import com.example.banking.repository.TransactionRepository;
  * Moves money from one account to another as a single all-or-nothing operation.
  *
  * WHY @Transactional: a transfer touches TWO accounts (debit one, credit the other) plus
- * TWO transaction records. Deposit/withdraw only ever touch one account, so a single atomic
- * $inc was enough there (see AccountBalanceRepository). Here, if the process crashed right
- * after debiting the sender but before crediting the receiver, money would simply vanish -
- * @Transactional (backed by MongoTransactionManager, see MongoTransactionConfig) makes
- * MongoDB itself undo the debit if anything later in this method throws.
+ * TWO transaction records. Deposit/withdraw only ever touch one account, so a single locked
+ * row update is enough there (see AccountBalanceRepository). Here, if the process crashed
+ * right after debiting the sender but before crediting the receiver, money would simply
+ * vanish - @Transactional (backed by Spring Boot's auto-configured JpaTransactionManager)
+ * makes PostgreSQL itself undo the debit if anything later in this method throws.
  *
- * IMPORTANT: MongoDB multi-document transactions require a replica set - see
- * MongoTransactionConfig for the Atlas-vs-standalone-local limitation.
+ * Unlike the previous MongoDB implementation, this needs no replica set: PostgreSQL
+ * supports multi-statement transactions on any installation.
  */
 @Service
 public class TransferService {
@@ -66,7 +66,7 @@ public class TransferService {
                 .orElseThrow(() -> accountNotFound(toAccountId));
 
         // Ownership + balance guard, exactly like TransactionService.withdraw - the sender
-        // must own fromAccountId and have enough balance, checked atomically.
+        // must own fromAccountId and have enough balance, checked while the row is locked.
         Optional<Account> debitedSender = accountBalanceRepository.withdraw(fromAccountId, userId, money);
         if (debitedSender.isEmpty()) {
             if (!accountRepository.existsByIdAndUserId(fromAccountId, userId)) {

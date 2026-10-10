@@ -1,114 +1,95 @@
 package com.example.banking.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
-import java.util.Map;
 import java.util.Optional;
 
-import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.UpdateDefinition;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.context.annotation.Import;
 
 import com.example.banking.model.Account;
 import com.example.banking.model.AccountType;
 
-// Checks WHAT we ask MongoDB to do (filter + update). It does not talk to a real database.
-@ExtendWith(MockitoExtension.class)
+// Real persistence tests against an in-memory database: they prove the balance changes
+// are atomic and the ownership/balance guards actually hold, instead of only checking
+// what query object we built (as the old MongoTemplate-mock tests did).
+@DataJpaTest
+@Import(AccountBalanceRepository.class)
 class AccountBalanceRepositoryTest {
 
     private static final String USER_ID = "user-1";
+    private static final String OTHER_USER_ID = "user-2";
 
-    @Mock
-    private MongoTemplate mongoTemplate;
+    @Autowired
+    private AccountRepository accountRepository;
 
+    @Autowired
     private AccountBalanceRepository repository;
 
-    private final Account updated =
-            new Account("123456789012", USER_ID, AccountType.SAVINGS, new BigDecimal("900.00"));
+    private String accountId;
 
     @BeforeEach
     void setUp() {
-        repository = new AccountBalanceRepository(mongoTemplate);
-    }
-
-    private void stubTemplate(Account result) {
-        when(mongoTemplate.findAndModify(any(Query.class), any(UpdateDefinition.class),
-                any(FindAndModifyOptions.class), eq(Account.class))).thenReturn(result);
-    }
-
-    private Document capturedFilter;
-    private Document capturedUpdate;
-
-    private void captureRequest() {
-        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
-        ArgumentCaptor<UpdateDefinition> updateCaptor = ArgumentCaptor.forClass(UpdateDefinition.class);
-        verify(mongoTemplate).findAndModify(queryCaptor.capture(), updateCaptor.capture(),
-                any(FindAndModifyOptions.class), eq(Account.class));
-        capturedFilter = queryCaptor.getValue().getQueryObject();
-        capturedUpdate = updateCaptor.getValue().getUpdateObject();
+        Account account = accountRepository.save(
+                new Account("123456789012", USER_ID, AccountType.SAVINGS, new BigDecimal("1000.00")));
+        accountId = account.getId();
     }
 
     @Test
-    void withdraw_filtersOnOwnerAndSufficientBalance_andDecrementsAtomically() {
-        stubTemplate(updated);
-
-        Optional<Account> result = repository.withdraw("acc-1", USER_ID, new BigDecimal("100.00"));
+    void deposit_addsAmountAndReturnsUpdatedAccount() {
+        Optional<Account> result = repository.deposit(accountId, USER_ID, new BigDecimal("100.00"));
 
         assertTrue(result.isPresent());
-        captureRequest();
-        assertEquals("acc-1", capturedFilter.get("id"));
-        assertEquals(USER_ID, capturedFilter.get("userId"));
-        Map<?, ?> balanceCondition = (Map<?, ?>) capturedFilter.get("balance");
-        assertNotNull(balanceCondition, "withdraw must guard with balance >= amount");
-        assertEquals(new BigDecimal("100.00"), balanceCondition.get("$gte"));
-        Map<?, ?> inc = (Map<?, ?>) capturedUpdate.get("$inc");
-        assertEquals(new BigDecimal("-100.00"), inc.get("balance"));
+        assertEquals(0, new BigDecimal("1100.00").compareTo(result.get().getBalance()));
+        // the stored row agrees with the returned one
+        assertEquals(0, new BigDecimal("1100.00")
+                .compareTo(accountRepository.findById(accountId).orElseThrow().getBalance()));
     }
 
     @Test
-    void deposit_filtersOnOwner_hasNoBalanceCondition_andIncrementsAtomically() {
-        stubTemplate(updated);
+    void deposit_wrongOwner_returnsEmptyAndBalanceUnchanged() {
+        assertTrue(repository.deposit(accountId, OTHER_USER_ID, new BigDecimal("100.00")).isEmpty());
+        assertEquals(0, new BigDecimal("1000.00")
+                .compareTo(accountRepository.findById(accountId).orElseThrow().getBalance()));
+    }
 
-        Optional<Account> result = repository.deposit("acc-1", USER_ID, new BigDecimal("100.00"));
+    @Test
+    void deposit_missingAccount_returnsEmpty() {
+        assertTrue(repository.deposit("no-such-id", USER_ID, new BigDecimal("100.00")).isEmpty());
+    }
+
+    @Test
+    void withdraw_subtractsWhenBalanceSufficient() {
+        Optional<Account> result = repository.withdraw(accountId, USER_ID, new BigDecimal("100.00"));
 
         assertTrue(result.isPresent());
-        captureRequest();
-        assertEquals("acc-1", capturedFilter.get("id"));
-        assertEquals(USER_ID, capturedFilter.get("userId"));
-        assertFalse(capturedFilter.containsKey("balance"));
-        Map<?, ?> inc = (Map<?, ?>) capturedUpdate.get("$inc");
-        assertEquals(new BigDecimal("100.00"), inc.get("balance"));
+        assertEquals(0, new BigDecimal("900.00").compareTo(result.get().getBalance()));
     }
 
     @Test
-    void withdraw_nothingMatched_returnsEmpty() {
-        stubTemplate(null);
-
-        assertTrue(repository.withdraw("acc-1", USER_ID, new BigDecimal("100.00")).isEmpty());
+    void withdraw_insufficientFunds_returnsEmptyAndBalanceUnchanged() {
+        assertTrue(repository.withdraw(accountId, USER_ID, new BigDecimal("1000.01")).isEmpty());
+        assertEquals(0, new BigDecimal("1000.00")
+                .compareTo(accountRepository.findById(accountId).orElseThrow().getBalance()));
     }
 
     @Test
-    void deposit_nothingMatched_returnsEmpty() {
-        // Covers both "no such account" and "account exists but belongs to someone else" -
-        // the caller can't tell these apart from this result alone (see TransactionService).
-        stubTemplate(null);
+    void withdraw_exactBalance_succeedsAndLeavesZero() {
+        Optional<Account> result = repository.withdraw(accountId, USER_ID, new BigDecimal("1000.00"));
 
-        assertTrue(repository.deposit("acc-1", USER_ID, new BigDecimal("100.00")).isEmpty());
+        assertTrue(result.isPresent());
+        assertEquals(0, BigDecimal.ZERO.compareTo(result.get().getBalance()));
+    }
+
+    @Test
+    void withdraw_wrongOwner_returnsEmptyAndBalanceUnchanged() {
+        assertTrue(repository.withdraw(accountId, OTHER_USER_ID, new BigDecimal("100.00")).isEmpty());
+        assertEquals(0, new BigDecimal("1000.00")
+                .compareTo(accountRepository.findById(accountId).orElseThrow().getBalance()));
     }
 }

@@ -1,7 +1,14 @@
 package com.example.banking.service;
 
+import java.time.Instant;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.example.banking.exception.IdempotencyInProgressException;
 import com.example.banking.model.IdempotencyRecord;
@@ -14,20 +21,32 @@ import com.example.banking.repository.IdempotencyRecordRepository;
  * "has this (userId, idempotencyKey) been claimed before, and if so what happened?" The
  * money-moving services (wired up in a later step) decide what to DO with that answer.
  *
- * WHY claim() can be called concurrently without a race: uniqueness is enforced by a MongoDB
- * unique index on (userId, idempotencyKey), not by application-level locking. Two simultaneous
- * callers both attempt an insert; the database allows only one to succeed, and the loser's
- * DuplicateKeyException is exactly the information needed to react correctly - the same
- * pattern already used for duplicate emails (UserService) and account-number collisions
- * (AccountService) elsewhere in this project.
+ * WHY claim() can be called concurrently without a race: uniqueness is enforced by a
+ * relational unique constraint on (userId, idempotencyKey), not by application-level locking.
+ * Two simultaneous callers both attempt an insert; the database allows only one to succeed,
+ * and the loser's DuplicateKeyException (Spring translates the unique-violation into it) is
+ * exactly the information needed to react correctly - the same pattern already used for
+ * duplicate emails (UserService) and account-number collisions (AccountService) elsewhere
+ * in this project.
  */
 @Service
 public class IdempotencyService {
 
     private final IdempotencyRecordRepository idempotencyRecordRepository;
+    // Self-injection (via the Spring proxy) so findExistingClaim() below really runs in its
+    // own fresh transaction - a direct this.findExistingClaim() call would bypass the proxy
+    // and silently inherit the poisoned transaction of the catch block.
+    private final IdempotencyService self;
 
     public IdempotencyService(IdempotencyRecordRepository idempotencyRecordRepository) {
+        this(idempotencyRecordRepository, null);
+    }
+
+    @Autowired
+    public IdempotencyService(IdempotencyRecordRepository idempotencyRecordRepository,
+                              @Lazy IdempotencyService self) {
         this.idempotencyRecordRepository = idempotencyRecordRepository;
+        this.self = self;
     }
 
     /**
@@ -44,21 +63,48 @@ public class IdempotencyService {
      *         anything).
      * @throws IdempotencyInProgressException if another, not-yet-finished request already
      *         owns this exact key right now.
+     *
+     * IMPLEMENTATION NOTE (PostgreSQL): the claim runs in its own REQUIRES_NEW transaction so
+     * the IN_PROGRESS row is committed - and therefore visible to concurrent requests -
+     * immediately, instead of being held uncommitted inside the caller's business transaction
+     * (which would make a concurrent claimant block on the unique index instead of getting
+     * the intended 409). The explicit flush() forces the INSERT inside the try block: without
+     * it, JPA would delay the INSERT until commit, after the catch block has already exited.
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public IdempotencyRecord claim(String userId, String idempotencyKey, String requestFingerprint) {
         try {
-            return idempotencyRecordRepository.save(new IdempotencyRecord(userId, idempotencyKey, requestFingerprint));
+            IdempotencyRecord record =
+                    idempotencyRecordRepository.save(new IdempotencyRecord(userId, idempotencyKey,
+                            requestFingerprint));
+            idempotencyRecordRepository.flush();
+            return record;
         } catch (DuplicateKeyException ex) {
-            IdempotencyRecord existing = idempotencyRecordRepository
-                    .findByUserIdAndIdempotencyKey(userId, idempotencyKey)
-                    .orElseThrow(() -> ex);
-
-            if (existing.getStatus() == IdempotencyStatus.IN_PROGRESS) {
-                throw new IdempotencyInProgressException();
-            }
-
-            return existing;
+            // The failed INSERT aborted this transaction (PostgreSQL aborts the whole
+            // transaction on any statement error), so the lookup below must run in a fresh
+            // transaction - hence the proxied call. Outside Spring (unit tests) self is null
+            // and there is no transaction anyway, so a direct call is equivalent.
+            IdempotencyService proxy = (self != null) ? self : this;
+            return proxy.findExistingClaim(userId, idempotencyKey);
         }
+    }
+
+    /**
+     * Reads the already-stored record for a colliding claim. Always invoked via the
+     * self-injected proxy from {@link #claim}'s catch block, in a fresh transaction.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public IdempotencyRecord findExistingClaim(String userId, String idempotencyKey) {
+        IdempotencyRecord existing = idempotencyRecordRepository
+                .findByUserIdAndIdempotencyKey(userId, idempotencyKey)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Idempotency claim vanished for key: " + idempotencyKey));
+
+        if (existing.getStatus() == IdempotencyStatus.IN_PROGRESS) {
+            throw new IdempotencyInProgressException();
+        }
+
+        return existing;
     }
 
     /**
@@ -97,5 +143,16 @@ public class IdempotencyService {
      */
     public void release(String recordId) {
         idempotencyRecordRepository.deleteById(recordId);
+    }
+
+    /**
+     * Scheduled replacement for the MongoDB TTL index: deletes idempotency records whose
+     * 24-hour retention has expired, so keys become reusable again and the table does not
+     * grow forever. Runs once an hour; each run is a single short transaction.
+     */
+    @Scheduled(fixedDelay = 3_600_000)
+    @Transactional
+    public void evictExpiredRecords() {
+        idempotencyRecordRepository.deleteByExpiresAtBefore(Instant.now());
     }
 }

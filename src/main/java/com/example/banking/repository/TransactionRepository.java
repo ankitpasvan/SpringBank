@@ -1,10 +1,8 @@
 package com.example.banking.repository;
 
-
-
-import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.example.banking.model.Transaction;
 
-public interface TransactionRepository extends MongoRepository<Transaction, String> {
+public interface TransactionRepository extends JpaRepository<Transaction, String> {
 }

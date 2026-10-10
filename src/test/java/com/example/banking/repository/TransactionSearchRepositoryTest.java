@@ -1,112 +1,101 @@
 package com.example.banking.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.domain.Sort;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.example.banking.model.Transaction;
 import com.example.banking.model.TransactionType;
 
-// Checks WHAT filter we send to MongoDB (via MongoTemplate). Does not talk to a real database.
-//
-// NOTE on the type-filter test below: Query.getQueryObject() returns the raw, UNCONVERTED
-// Criteria contents. Spring Data MongoDB only converts a Java enum to its BSON String form
-// (via MappingMongoConverter) at actual query EXECUTION time, inside the real MongoTemplate.
-// Since MongoTemplate is mocked here, that conversion never runs, so the captured filter
-// still holds the raw TransactionType enum value, not the String "DEPOSIT".
-@ExtendWith(MockitoExtension.class)
+// Real persistence tests against an in-memory database: they prove the filters, date ranges,
+// sorting and pagination actually work, instead of only checking what query object we built.
+@DataJpaTest
+@Import(TransactionSearchRepository.class)
 class TransactionSearchRepositoryTest {
 
     private static final String ACCOUNT_ID = "acc-1";
+    private static final String OTHER_ACCOUNT_ID = "acc-2";
 
-    @Mock
-    private MongoTemplate mongoTemplate;
+    @Autowired
+    private TransactionRepository transactionRepository;
 
+    @Autowired
     private TransactionSearchRepository repository;
+
+    private Transaction tx(String accountId, TransactionType type, String createdAt) {
+        Transaction transaction = new Transaction(accountId, type, new BigDecimal("10.00"),
+                new BigDecimal("10.00"), null);
+        ReflectionTestUtils.setField(transaction, "createdAt", Instant.parse(createdAt));
+        return transactionRepository.save(transaction);
+    }
 
     @BeforeEach
     void setUp() {
-        repository = new TransactionSearchRepository(mongoTemplate);
+        tx(ACCOUNT_ID, TransactionType.DEPOSIT, "2026-01-10T10:00:00Z");
+        tx(ACCOUNT_ID, TransactionType.WITHDRAWAL, "2026-01-20T10:00:00Z");
+        tx(ACCOUNT_ID, TransactionType.DEPOSIT, "2026-02-10T10:00:00Z");
+        tx(OTHER_ACCOUNT_ID, TransactionType.DEPOSIT, "2026-01-15T10:00:00Z");
     }
 
-    private Query captureCountFilter() {
-        ArgumentCaptor<Query> captor = ArgumentCaptor.forClass(Query.class);
-        verify(mongoTemplate).count(captor.capture(), eq(Transaction.class));
-        return captor.getValue();
-    }
-
-    @Test
-    void search_noFilters_onlyFiltersOnAccountId() {
-        when(mongoTemplate.count(any(Query.class), eq(Transaction.class))).thenReturn(0L);
-        when(mongoTemplate.find(any(Query.class), eq(Transaction.class))).thenReturn(List.of());
-        Pageable pageable = PageRequest.of(0, 20);
-
-        repository.search(ACCOUNT_ID, null, null, null, pageable);
-
-        Query filter = captureCountFilter();
-        assertEquals(ACCOUNT_ID, filter.getQueryObject().get("accountId"));
-        assertEquals(1, filter.getQueryObject().keySet().size(), "no extra filter fields expected");
+    private Pageable newestFirst(int page, int size) {
+        return PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
     }
 
     @Test
-    void search_withTypeFilter_addsTypeToQuery() {
-        when(mongoTemplate.count(any(Query.class), eq(Transaction.class))).thenReturn(0L);
-        when(mongoTemplate.find(any(Query.class), eq(Transaction.class))).thenReturn(List.of());
-        Pageable pageable = PageRequest.of(0, 20);
+    void search_noFilters_returnsOnlyThisAccountsTransactionsNewestFirst() {
+        Page<Transaction> page = repository.search(ACCOUNT_ID, null, null, null, newestFirst(0, 20));
 
-        repository.search(ACCOUNT_ID, TransactionType.DEPOSIT, null, null, pageable);
-
-        Query filter = captureCountFilter();
-        assertEquals(TransactionType.DEPOSIT, filter.getQueryObject().get("type"));
+        assertEquals(3, page.getTotalElements());
+        List<Instant> dates = page.getContent().stream().map(Transaction::getCreatedAt).toList();
+        assertEquals(List.of(Instant.parse("2026-02-10T10:00:00Z"), Instant.parse("2026-01-20T10:00:00Z"),
+                Instant.parse("2026-01-10T10:00:00Z")), dates);
     }
 
     @Test
-    void search_withDateRange_addsGteAndLtOnCreatedAt() {
-        when(mongoTemplate.count(any(Query.class), eq(Transaction.class))).thenReturn(0L);
-        when(mongoTemplate.find(any(Query.class), eq(Transaction.class))).thenReturn(List.of());
-        Pageable pageable = PageRequest.of(0, 20);
-        Instant from = Instant.parse("2026-01-01T00:00:00Z");
-        Instant to = Instant.parse("2026-02-01T00:00:00Z");
+    void search_withTypeFilter_returnsOnlyMatchingType() {
+        Page<Transaction> page =
+                repository.search(ACCOUNT_ID, TransactionType.DEPOSIT, null, null, newestFirst(0, 20));
 
-        repository.search(ACCOUNT_ID, null, from, to, pageable);
-
-        Query filter = captureCountFilter();
-        Object createdAt = filter.getQueryObject().get("createdAt");
-        assertEquals(true, createdAt instanceof org.bson.Document);
-        org.bson.Document range = (org.bson.Document) createdAt;
-        assertEquals(from, range.get("$gte"));
-        assertEquals(to, range.get("$lt"));
+        assertEquals(2, page.getTotalElements());
+        assertTrue(page.getContent().stream().allMatch(t -> t.getType() == TransactionType.DEPOSIT));
     }
 
     @Test
-    void search_returnsPageWithCorrectTotals() {
-        when(mongoTemplate.count(any(Query.class), eq(Transaction.class))).thenReturn(45L);
-        when(mongoTemplate.find(any(Query.class), eq(Transaction.class))).thenReturn(List.of(
-                new Transaction(ACCOUNT_ID, TransactionType.DEPOSIT, new java.math.BigDecimal("10.00"),
-                        new java.math.BigDecimal("10.00"), null)));
-        Pageable pageable = PageRequest.of(0, 20);
+    void search_withDateRange_appliesInclusiveFromAndExclusiveTo() {
+        Instant from = Instant.parse("2026-01-15T00:00:00Z");
+        Instant toExclusive = Instant.parse("2026-02-01T00:00:00Z");
 
-        Page<Transaction> page = repository.search(ACCOUNT_ID, null, null, null, pageable);
+        Page<Transaction> page = repository.search(ACCOUNT_ID, null, from, toExclusive, newestFirst(0, 20));
 
-        assertEquals(45L, page.getTotalElements());
-        assertEquals(3, page.getTotalPages());
-        assertEquals(1, page.getContent().size());
+        assertEquals(1, page.getTotalElements());
+        assertEquals(TransactionType.WITHDRAWAL, page.getContent().get(0).getType());
+    }
+
+    @Test
+    void search_pagination_returnsCorrectPageAndTotals() {
+        Page<Transaction> first = repository.search(ACCOUNT_ID, null, null, null, newestFirst(0, 2));
+        Page<Transaction> second = repository.search(ACCOUNT_ID, null, null, null, newestFirst(1, 2));
+
+        assertEquals(3, first.getTotalElements());
+        assertEquals(2, first.getTotalPages());
+        assertEquals(2, first.getContent().size());
+        assertEquals(1, second.getContent().size());
+        // no overlap between pages
+        assertTrue(first.getContent().stream()
+                .noneMatch(t -> t.getId().equals(second.getContent().get(0).getId())));
     }
 }

@@ -34,9 +34,9 @@ import com.example.banking.repository.TransactionRepository;
 // no Spring container here to intercept the exception and invoke the transaction manager).
 // What IS tested is the property that makes rollback meaningful: when a later step fails,
 // no transaction record is ever saved - the method must throw before writing anything
-// partial. Real rollback (the sender's debit being undone inside MongoDB) can only be
-// verified against a replica-set MongoDB (e.g. Atlas), where @Transactional actually runs -
-// see MongoTransactionConfig.
+// partial. Real rollback (the sender's debit being undone in the database) is exercised by
+// @Transactional against PostgreSQL, where it works on any installation (no replica set
+// needed, unlike the previous MongoDB implementation).
 @ExtendWith(MockitoExtension.class)
 class TransferServiceTest {
 
@@ -154,10 +154,10 @@ class TransferServiceTest {
 
     @Test
     void transfer_receiverDepositFailsAfterSenderDebited_throwsAndRecordsNothing() {
-        // A rare race: the receiver account existed when checked, but the atomic deposit
+        // A rare race: the receiver account existed when checked, but the locked update
         // still matches nothing (e.g. deleted a moment later). This must fail loudly rather
         // than silently losing the sender's money - @Transactional is what actually undoes
-        // the sender's debit (only verifiable against a real replica-set MongoDB).
+        // the sender's debit (verifiable against a real PostgreSQL database).
         when(accountRepository.findById(TO_ACCOUNT_ID))
                 .thenReturn(Optional.of(account(RECEIVER_USER_ID, "50.00")));
         when(accountBalanceRepository.withdraw(FROM_ACCOUNT_ID, SENDER_USER_ID, new BigDecimal("100.00")))

@@ -28,14 +28,14 @@ import org.springframework.test.web.servlet.MockMvc;
  * those moving parts while still exercising the real filter chain.)
  *
  * Every request body below is deliberately invalid/minimal so Bean Validation rejects it
- * BEFORE any controller reaches MongoDB. MongoDB is not running in this environment, and a
- * real query would hang until the driver's connection timeout instead of failing fast.
+ * BEFORE any controller reaches the database. (The test context uses an in-memory H2
+ * database - see src/test/resources/application.properties - so even a request that did
+ * reach a repository would hit H2, never a real PostgreSQL.)
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
-        "jwt.secret=XzloAJfJIyp5Fr8WTUAtBHO0xC00qWr7Hzumm+cijHw=",
-        "spring.data.mongodb.auto-index-creation=false"
+        "jwt.secret=XzloAJfJIyp5Fr8WTUAtBHO0xC00qWr7Hzumm+cijHw="
 })
 class SecurityFilterChainIntegrationTest {
 
@@ -92,7 +92,7 @@ class SecurityFilterChainIntegrationTest {
 
         // {} fails CreateAccountRequest validation (userId/accountType required) -> 400.
         // Getting 400 (not 401/403) PROVES the token authenticated successfully and the
-        // request reached the controller's validation layer, without ever touching MongoDB.
+        // request reached the controller's validation layer, without ever touching the database.
         mockMvc.perform(post("/api/accounts")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)

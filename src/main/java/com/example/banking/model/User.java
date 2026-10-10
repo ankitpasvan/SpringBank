@@ -1,31 +1,43 @@
 package com.example.banking.model;
+
 import java.time.Instant;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import org.hibernate.annotations.UuidGenerator;
 
 /**
- * MongoDB document stored in the "users" collection.
+ * Application user, stored in the "users" table.
  * Only the password HASH is stored, never the plaintext password.
  */
-@Document(collection = "users")
+@Entity
+@Table(name = "users")
 public class User {
 
     @Id
+    @UuidGenerator
     private String id;
 
     private String name;
 
-    // unique index = database-level safety net against duplicate emails
-    @Indexed(unique = true)
+    // unique constraint = database-level safety net against duplicate emails
+    @Column(unique = true, nullable = false)
     private String email;
 
+    @Column(nullable = false)
     private String passwordHash;
 
+    @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
     private Instant updatedAt;
+
+    /** Required by JPA. */
+    protected User() {
+    }
 
     public User(String name, String email, String passwordHash) {
         this.name = name;

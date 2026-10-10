@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.example.banking.dto.TransactionResponse;
 import com.example.banking.exception.IdempotencyKeyConflictException;
@@ -50,6 +51,7 @@ public class TransactionService {
      *                       of moving money again; the same key with a DIFFERENT amount or
      *                       description is rejected with 409 Conflict.
      */
+    @Transactional
     public TransactionResponse deposit(String accountId, String userId, BigDecimal amount, String description,
                                        String idempotencyKey) {
         BigDecimal money = normalize(amount);
@@ -63,10 +65,11 @@ public class TransactionService {
             return replayIfFingerprintMatches(claim, fingerprint);
         }
 
-        // The balance write and the ledger write below are separate. If the ledger write (or
-        // the completion bookkeeping) fails AFTER the balance already moved, the claim must
-        // NOT be released: releasing would let a retry move the money a second time. The
-        // claim stays IN_PROGRESS (bounded by the 24h TTL) and fails closed instead.
+        // The balance write and the ledger write below run inside the same database
+        // transaction (see @Transactional on this method), so a ledger failure after the
+        // balance moved rolls everything back. The fail-closed claim handling below is
+        // still kept as defense-in-depth for failures outside the transaction (e.g. the
+        // completion bookkeeping itself).
         boolean balanceMutated = false;
         try {
             Account updated = accountBalanceRepository.deposit(accountId, userId, money)
@@ -88,6 +91,7 @@ public class TransactionService {
     }
 
     /** @param idempotencyKey see {@link #deposit}. */
+    @Transactional
     public TransactionResponse withdraw(String accountId, String userId, BigDecimal amount, String description,
                                         String idempotencyKey) {
         BigDecimal money = normalize(amount);
@@ -108,7 +112,7 @@ public class TransactionService {
         try {
             Optional<Account> updated = accountBalanceRepository.withdraw(accountId, userId, money);
             if (updated.isEmpty()) {
-                // The atomic update matched nothing: either no such account, the account isn't
+                // The locked update matched nothing: either no such account, the account isn't
                 // yours, or balance < amount. Only the last case is "insufficient funds".
                 if (!accountRepository.existsByIdAndUserId(accountId, userId)) {
                     throw accountNotFound(accountId);
@@ -150,7 +154,7 @@ public class TransactionService {
 
         Optional<Account> updated = accountBalanceRepository.withdraw(accountId, userId, money);
         if (updated.isEmpty()) {
-            // The atomic update matched nothing: either no such account, the account isn't
+            // The locked update matched nothing: either no such account, the account isn't
             // yours, or balance < amount. Only the last case is "insufficient funds".
             if (!accountRepository.existsByIdAndUserId(accountId, userId)) {
                 throw accountNotFound(accountId);
@@ -202,8 +206,7 @@ public class TransactionService {
 
     private TransactionResponse recordTransaction(String accountId, TransactionType type, BigDecimal amount,
                                                   Account updatedAccount, String description) {
-        // Note: the balance change above and this insert are two separate writes.
-        // Multi-document MongoDB transactions arrive with the transfer feature.
+        // Note: the balance change above and this insert run in the same transaction now.
         Transaction saved = transactionRepository.save(
                 new Transaction(accountId, type, amount, updatedAccount.getBalance(), description));
         log.info("Transaction {} recorded: type={}, accountId={}, amount={}",
