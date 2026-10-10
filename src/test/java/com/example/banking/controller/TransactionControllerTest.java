@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import com.example.banking.dto.TransactionResponse;
 import com.example.banking.exception.GlobalExceptionHandler;
 import com.example.banking.exception.IdempotencyInProgressException;
+import com.example.banking.exception.IdempotencyKeyConflictException;
 import com.example.banking.exception.InsufficientFundsException;
 import com.example.banking.exception.ResourceNotFoundException;
 import com.example.banking.model.TransactionType;
@@ -240,5 +241,19 @@ class TransactionControllerTest {
                 .andExpect(jsonPath("$.status").value(409))
                 .andExpect(jsonPath("$.message")
                         .value("A request with this idempotency key is already being processed"));
+    }
+
+    @Test
+    void deposit_idempotencyKeyConflict_returns409() throws Exception {
+        when(transactionService.deposit(eq("acc-1"), eq("user-1"), any(BigDecimal.class), any(), eq("key-abc")))
+                .thenThrow(new IdempotencyKeyConflictException());
+
+        mockMvc.perform(post(DEPOSIT_URL).principal(principal("user-1"))
+                        .header("Idempotency-Key", "key-abc")
+                        .contentType(MediaType.APPLICATION_JSON).content(body("10.00")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.message")
+                        .value("This idempotency key was already used with a different request"));
     }
 }

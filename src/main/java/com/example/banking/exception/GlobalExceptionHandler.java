@@ -38,6 +38,15 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request, Map.of());
     }
 
+    // 409 = this idempotency key already completed a DIFFERENT request (different amount or
+    // description). Replaying the old result would lie to the caller, and re-executing would
+    // move money twice - the client must retry the genuinely different request with a fresh key.
+    @ExceptionHandler(IdempotencyKeyConflictException.class)
+    public ResponseEntity<ErrorResponse> handleIdempotencyKeyConflict(IdempotencyKeyConflictException ex,
+                                                                      HttpServletRequest request) {
+        return build(HttpStatus.CONFLICT, ex.getMessage(), request, Map.of());
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex,
                                                                 HttpServletRequest request) {

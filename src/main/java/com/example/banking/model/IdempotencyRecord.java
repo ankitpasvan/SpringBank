@@ -20,6 +20,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
  * a deliberate simplification: it bounds crash recovery to at most 24 hours rather than
  * guaranteeing instant recovery - an acceptable, explainable trade-off for this project, and
  * the same retention window several real payment APIs use for idempotency keys.
+ *
+ * WHY requestFingerprint: the same key reused with a DIFFERENT amount or description must be
+ * rejected (409), not silently replayed. Records written before fingerprinting existed have a
+ * null fingerprint and are backfilled on first replay from the transaction row they point to
+ * (see TransactionService); the 24h TTL bounds how long such legacy records can exist.
  */
 @Document(collection = "idempotency_records")
 @CompoundIndex(name = "user_key_idx", def = "{'userId': 1, 'idempotencyKey': 1}", unique = true)
@@ -34,6 +39,10 @@ public class IdempotencyRecord {
 
     private IdempotencyStatus status;
 
+    // SHA-256 over the normalized request (account, operation, amount, description).
+    // Null only for records written before fingerprinting existed.
+    private String requestFingerprint;
+
     // Set only once the underlying operation has actually completed.
     private String resultTransactionId;
 
@@ -44,9 +53,10 @@ public class IdempotencyRecord {
     @Indexed(expireAfterSeconds = 86_400)
     private Instant createdAt;
 
-    public IdempotencyRecord(String userId, String idempotencyKey) {
+    public IdempotencyRecord(String userId, String idempotencyKey, String requestFingerprint) {
         this.userId = userId;
         this.idempotencyKey = idempotencyKey;
+        this.requestFingerprint = requestFingerprint;
         this.status = IdempotencyStatus.IN_PROGRESS;
         this.createdAt = Instant.now();
     }
@@ -71,6 +81,19 @@ public class IdempotencyRecord {
 
     public IdempotencyStatus getStatus() {
         return status;
+    }
+
+    public String getRequestFingerprint() {
+        return requestFingerprint;
+    }
+
+    /**
+     * Sets the fingerprint exactly once, for legacy records that were written before
+     * fingerprinting existed. Never overwrites an already stored fingerprint - callers must
+     * check {@link #getRequestFingerprint()} first (see IdempotencyService.ensureFingerprint).
+     */
+    public void setRequestFingerprint(String requestFingerprint) {
+        this.requestFingerprint = requestFingerprint;
     }
 
     public String getResultTransactionId() {

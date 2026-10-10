@@ -3,6 +3,7 @@ package com.example.banking.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -21,6 +22,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.example.banking.dto.TransactionResponse;
 import com.example.banking.exception.IdempotencyInProgressException;
+import com.example.banking.exception.IdempotencyKeyConflictException;
 import com.example.banking.exception.InsufficientFundsException;
 import com.example.banking.exception.ResourceNotFoundException;
 import com.example.banking.model.Account;
@@ -31,6 +33,7 @@ import com.example.banking.model.TransactionType;
 import com.example.banking.repository.AccountBalanceRepository;
 import com.example.banking.repository.AccountRepository;
 import com.example.banking.repository.TransactionRepository;
+import com.example.banking.util.IdempotencyFingerprint;
 
 @ExtendWith(MockitoExtension.class)
 class TransactionServiceTest {
@@ -69,15 +72,31 @@ class TransactionServiceTest {
     }
 
     private IdempotencyRecord freshClaim(String recordId) {
-        IdempotencyRecord claim = new IdempotencyRecord(USER_ID, KEY);
+        IdempotencyRecord claim = new IdempotencyRecord(USER_ID, KEY, "fp-new");
         ReflectionTestUtils.setField(claim, "id", recordId);
         return claim;
     }
 
-    private IdempotencyRecord completedClaim(String resultTransactionId) {
-        IdempotencyRecord claim = new IdempotencyRecord(USER_ID, KEY);
+    private IdempotencyRecord completedClaim(String resultTransactionId, String fingerprint) {
+        IdempotencyRecord claim = new IdempotencyRecord(USER_ID, KEY, fingerprint);
         claim.markCompleted(resultTransactionId, null);
         return claim;
+    }
+
+    private String depositFingerprint(String amount, String description) {
+        return IdempotencyFingerprint.of(ACCOUNT_ID, TransactionType.DEPOSIT, new BigDecimal(amount), description);
+    }
+
+    private String withdrawFingerprint(String amount, String description) {
+        return IdempotencyFingerprint.of(ACCOUNT_ID, TransactionType.WITHDRAWAL, new BigDecimal(amount), description);
+    }
+
+    private Transaction storedTransaction(String id, TransactionType type, String amount, String balanceAfter,
+                                          String description) {
+        Transaction tx = new Transaction(ACCOUNT_ID, type, new BigDecimal(amount), new BigDecimal(balanceAfter),
+                description);
+        ReflectionTestUtils.setField(tx, "id", id);
+        return tx;
     }
 
     // ---------- existing behaviour, now with a trailing null idempotencyKey (no change) ----------
@@ -197,14 +216,13 @@ class TransactionServiceTest {
         verifyNoInteractions(accountBalanceRepository, accountRepository, transactionRepository, idempotencyService);
     }
 
-    // ---------- idempotency ----------
+    // ---------- idempotency: replay ----------
 
     @Test
     void deposit_withCompletedIdempotencyKey_replaysWithoutExecutingAgain() {
-        Transaction existing = new Transaction(ACCOUNT_ID, TransactionType.DEPOSIT, new BigDecimal("500.00"),
-                new BigDecimal("1500.00"), "salary");
-        ReflectionTestUtils.setField(existing, "id", "tx-1");
-        when(idempotencyService.claim(USER_ID, KEY)).thenReturn(completedClaim("tx-1"));
+        Transaction existing = storedTransaction("tx-1", TransactionType.DEPOSIT, "500.00", "1500.00", "salary");
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any()))
+                .thenReturn(completedClaim("tx-1", depositFingerprint("500.00", "salary")));
         when(transactionRepository.findById("tx-1")).thenReturn(Optional.of(existing));
 
         TransactionResponse response =
@@ -218,10 +236,9 @@ class TransactionServiceTest {
 
     @Test
     void withdraw_withCompletedIdempotencyKey_replaysWithoutExecutingAgain() {
-        Transaction existing = new Transaction(ACCOUNT_ID, TransactionType.WITHDRAWAL, new BigDecimal("200.00"),
-                new BigDecimal("800.00"), "rent");
-        ReflectionTestUtils.setField(existing, "id", "tx-2");
-        when(idempotencyService.claim(USER_ID, KEY)).thenReturn(completedClaim("tx-2"));
+        Transaction existing = storedTransaction("tx-2", TransactionType.WITHDRAWAL, "200.00", "800.00", "rent");
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any()))
+                .thenReturn(completedClaim("tx-2", withdrawFingerprint("200.00", "rent")));
         when(transactionRepository.findById("tx-2")).thenReturn(Optional.of(existing));
 
         TransactionResponse response =
@@ -234,8 +251,110 @@ class TransactionServiceTest {
     }
 
     @Test
+    void deposit_sameKeySamePayload_replaysOriginalTransactionId() {
+        Transaction existing = storedTransaction("tx-1", TransactionType.DEPOSIT, "500.00", "1500.00", "salary");
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any()))
+                .thenReturn(completedClaim("tx-1", depositFingerprint("500.00", "salary")));
+        when(transactionRepository.findById("tx-1")).thenReturn(Optional.of(existing));
+
+        TransactionResponse first =
+                transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00"), "salary", KEY);
+        TransactionResponse second =
+                transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00"), "salary", KEY);
+
+        assertEquals("tx-1", first.id());
+        assertEquals("tx-1", second.id());
+        verifyNoInteractions(accountBalanceRepository);
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void deposit_equivalentAmountRepresentations_replayAsSameRequest() {
+        // 500, 500.0 and 500.00 normalize identically, so they share one fingerprint.
+        Transaction existing = storedTransaction("tx-1", TransactionType.DEPOSIT, "500.00", "1500.00", "salary");
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any()))
+                .thenReturn(completedClaim("tx-1", depositFingerprint("500.00", "salary")));
+        when(transactionRepository.findById("tx-1")).thenReturn(Optional.of(existing));
+
+        TransactionResponse response =
+                transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.0"), "salary", KEY);
+
+        assertEquals("tx-1", response.id());
+        verifyNoInteractions(accountBalanceRepository);
+    }
+
+    // ---------- idempotency: conflicts ----------
+
+    @Test
+    void deposit_sameKeyDifferentAmount_throwsConflictAndTouchesNothing() {
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any()))
+                .thenReturn(completedClaim("tx-1", depositFingerprint("500.00", "salary")));
+
+        assertThrows(IdempotencyKeyConflictException.class,
+                () -> transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("600.00"), "salary", KEY));
+
+        verifyNoInteractions(accountBalanceRepository, transactionRepository);
+    }
+
+    @Test
+    void deposit_sameKeyDifferentDescription_throwsConflict() {
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any()))
+                .thenReturn(completedClaim("tx-1", depositFingerprint("500.00", "salary")));
+
+        assertThrows(IdempotencyKeyConflictException.class,
+                () -> transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00"), "bonus", KEY));
+
+        verifyNoInteractions(accountBalanceRepository);
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void withdraw_sameKeyDifferentAmount_throwsConflict() {
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any()))
+                .thenReturn(completedClaim("tx-2", withdrawFingerprint("200.00", "rent")));
+
+        assertThrows(IdempotencyKeyConflictException.class,
+                () -> transactionService.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("250.00"), "rent", KEY));
+
+        verify(accountBalanceRepository, never()).withdraw(any(), any(), any());
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    // ---------- idempotency: legacy records ----------
+
+    @Test
+    void deposit_legacyRecordWithoutFingerprint_backfillsFromTransactionAndReplays() {
+        Transaction existing = storedTransaction("tx-1", TransactionType.DEPOSIT, "500.00", "1500.00", "salary");
+        IdempotencyRecord legacy = completedClaim("tx-1", null);
+        ReflectionTestUtils.setField(legacy, "id", "rec-1");
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any())).thenReturn(legacy);
+        when(transactionRepository.findById("tx-1")).thenReturn(Optional.of(existing));
+        when(idempotencyService.ensureFingerprint(eq("rec-1"), any())).thenAnswer(inv -> inv.getArgument(1));
+
+        TransactionResponse response =
+                transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00"), "salary", KEY);
+
+        assertEquals("tx-1", response.id());
+        verify(idempotencyService).ensureFingerprint(eq("rec-1"), any());
+        verifyNoInteractions(accountBalanceRepository);
+    }
+
+    @Test
+    void deposit_legacyRecordWithMissingTransaction_throwsIllegalState() {
+        IdempotencyRecord legacy = completedClaim("tx-99", null);
+        ReflectionTestUtils.setField(legacy, "id", "rec-9");
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any())).thenReturn(legacy);
+        when(transactionRepository.findById("tx-99")).thenReturn(Optional.empty());
+
+        assertThrows(IllegalStateException.class,
+                () -> transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00"), "salary", KEY));
+    }
+
+    // ---------- idempotency: fresh claims, failures, release ----------
+
+    @Test
     void deposit_freshIdempotencyKey_executesOnceAndMarksCompleted() {
-        when(idempotencyService.claim(USER_ID, KEY)).thenReturn(freshClaim("rec-1"));
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any())).thenReturn(freshClaim("rec-1"));
         when(accountBalanceRepository.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00")))
                 .thenReturn(Optional.of(accountWithBalance("1500.00")));
         when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> {
@@ -256,7 +375,8 @@ class TransactionServiceTest {
 
     @Test
     void deposit_idempotencyKeyInProgress_propagatesExceptionWithoutTouchingMoney() {
-        when(idempotencyService.claim(USER_ID, KEY)).thenThrow(new IdempotencyInProgressException());
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any()))
+                .thenThrow(new IdempotencyInProgressException());
 
         assertThrows(IdempotencyInProgressException.class,
                 () -> transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("10.00"), null, KEY));
@@ -265,8 +385,8 @@ class TransactionServiceTest {
     }
 
     @Test
-    void deposit_failedBusinessOperation_releasesClaim_andDoesNotMarkCompleted() {
-        when(idempotencyService.claim(USER_ID, KEY)).thenReturn(freshClaim("rec-1"));
+    void deposit_failedBeforeBalanceMoved_releasesClaim_andDoesNotMarkCompleted() {
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any())).thenReturn(freshClaim("rec-1"));
         when(accountBalanceRepository.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("50.00")))
                 .thenReturn(Optional.empty());
 
@@ -278,8 +398,8 @@ class TransactionServiceTest {
     }
 
     @Test
-    void withdraw_failedBusinessOperation_releasesClaim_andDoesNotMarkCompleted() {
-        when(idempotencyService.claim(USER_ID, KEY)).thenReturn(freshClaim("rec-2"));
+    void withdraw_failedBeforeBalanceMoved_releasesClaim_andDoesNotMarkCompleted() {
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any())).thenReturn(freshClaim("rec-2"));
         when(accountBalanceRepository.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("999.00")))
                 .thenReturn(Optional.empty());
         when(accountRepository.existsByIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(true);
@@ -288,6 +408,38 @@ class TransactionServiceTest {
                 () -> transactionService.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("999.00"), null, KEY));
 
         verify(idempotencyService).release("rec-2");
+        verify(idempotencyService, never()).markCompleted(any(), any(), any());
+    }
+
+    @Test
+    void deposit_ledgerSaveFailsAfterBalanceMoved_doesNotReleaseClaim() {
+        // The balance write succeeded but the ledger insert threw: money may have moved, so
+        // releasing the claim would let a retry move it a second time. The claim must stay.
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any())).thenReturn(freshClaim("rec-1"));
+        when(accountBalanceRepository.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00")))
+                .thenReturn(Optional.of(accountWithBalance("1500.00")));
+        when(transactionRepository.save(any(Transaction.class)))
+                .thenThrow(new RuntimeException("ledger write failed"));
+
+        assertThrows(RuntimeException.class,
+                () -> transactionService.deposit(ACCOUNT_ID, USER_ID, new BigDecimal("500.00"), "salary", KEY));
+
+        verify(idempotencyService, never()).release(any());
+        verify(idempotencyService, never()).markCompleted(any(), any(), any());
+    }
+
+    @Test
+    void withdraw_ledgerSaveFailsAfterBalanceMoved_doesNotReleaseClaim() {
+        when(idempotencyService.claim(eq(USER_ID), eq(KEY), any())).thenReturn(freshClaim("rec-2"));
+        when(accountBalanceRepository.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("200.00")))
+                .thenReturn(Optional.of(accountWithBalance("800.00")));
+        when(transactionRepository.save(any(Transaction.class)))
+                .thenThrow(new RuntimeException("ledger write failed"));
+
+        assertThrows(RuntimeException.class,
+                () -> transactionService.withdraw(ACCOUNT_ID, USER_ID, new BigDecimal("200.00"), "rent", KEY));
+
+        verify(idempotencyService, never()).release(any());
         verify(idempotencyService, never()).markCompleted(any(), any(), any());
     }
 }

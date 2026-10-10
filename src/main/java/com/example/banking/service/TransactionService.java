@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.example.banking.dto.TransactionResponse;
+import com.example.banking.exception.IdempotencyKeyConflictException;
 import com.example.banking.exception.InsufficientFundsException;
 import com.example.banking.exception.ResourceNotFoundException;
 import com.example.banking.model.Account;
@@ -19,6 +20,7 @@ import com.example.banking.model.TransactionType;
 import com.example.banking.repository.AccountBalanceRepository;
 import com.example.banking.repository.AccountRepository;
 import com.example.banking.repository.TransactionRepository;
+import com.example.banking.util.IdempotencyFingerprint;
 
 @Service
 public class TransactionService {
@@ -43,28 +45,44 @@ public class TransactionService {
 
     /**
      * @param idempotencyKey optional. Null/blank -> behaves exactly as before this feature
-     *                       existed. Non-blank -> a retry with the SAME (userId, key) replays
-     *                       the first attempt's result instead of moving money again.
+     *                       existed. Non-blank -> a retry with the SAME (userId, key) and the
+     *                       SAME normalized payload replays the first attempt's result instead
+     *                       of moving money again; the same key with a DIFFERENT amount or
+     *                       description is rejected with 409 Conflict.
      */
     public TransactionResponse deposit(String accountId, String userId, BigDecimal amount, String description,
                                        String idempotencyKey) {
+        BigDecimal money = normalize(amount);
         if (isBlank(idempotencyKey)) {
-            return executeDeposit(accountId, userId, amount, description);
+            return executeDeposit(accountId, userId, money, description);
         }
 
-        IdempotencyRecord claim = idempotencyService.claim(userId, idempotencyKey);
+        String fingerprint = IdempotencyFingerprint.of(accountId, TransactionType.DEPOSIT, money, description);
+        IdempotencyRecord claim = idempotencyService.claim(userId, idempotencyKey, fingerprint);
         if (claim.getStatus() == IdempotencyStatus.COMPLETED) {
-            return replay(claim);
+            return replayIfFingerprintMatches(claim, fingerprint);
         }
 
+        // The balance write and the ledger write below are separate. If the ledger write (or
+        // the completion bookkeeping) fails AFTER the balance already moved, the claim must
+        // NOT be released: releasing would let a retry move the money a second time. The
+        // claim stays IN_PROGRESS (bounded by the 24h TTL) and fails closed instead.
+        boolean balanceMutated = false;
         try {
-            TransactionResponse response = executeDeposit(accountId, userId, amount, description);
+            Account updated = accountBalanceRepository.deposit(accountId, userId, money)
+                    .orElseThrow(() -> accountNotFound(accountId));
+            balanceMutated = true;
+            TransactionResponse response =
+                    recordTransaction(accountId, TransactionType.DEPOSIT, money, updated, description);
             idempotencyService.markCompleted(claim.getId(), response.id(), null);
             return response;
         } catch (RuntimeException ex) {
-            // Nothing was persisted if executeDeposit threw, so releasing here is always safe
-            // and lets a retry with the same key start cleanly.
-            idempotencyService.release(claim.getId());
+            if (!balanceMutated) {
+                idempotencyService.release(claim.getId());
+            } else {
+                log.warn("Deposit partially completed for idempotency claim {}: balance mutated but a "
+                        + "later step failed; claim left IN_PROGRESS", claim.getId());
+            }
             throw ex;
         }
     }
@@ -72,21 +90,44 @@ public class TransactionService {
     /** @param idempotencyKey see {@link #deposit}. */
     public TransactionResponse withdraw(String accountId, String userId, BigDecimal amount, String description,
                                         String idempotencyKey) {
+        BigDecimal money = normalize(amount);
         if (isBlank(idempotencyKey)) {
-            return executeWithdraw(accountId, userId, amount, description);
+            return executeWithdraw(accountId, userId, money, description);
         }
 
-        IdempotencyRecord claim = idempotencyService.claim(userId, idempotencyKey);
+        String fingerprint = IdempotencyFingerprint.of(accountId, TransactionType.WITHDRAWAL, money, description);
+        IdempotencyRecord claim = idempotencyService.claim(userId, idempotencyKey, fingerprint);
         if (claim.getStatus() == IdempotencyStatus.COMPLETED) {
-            return replay(claim);
+            return replayIfFingerprintMatches(claim, fingerprint);
         }
 
+        // Same phase discipline as deposit(): only release the claim when the balance was
+        // never touched. A withdrawal that matched nothing mutates nothing, so the
+        // "no such account" vs "insufficient funds" distinction is unchanged.
+        boolean balanceMutated = false;
         try {
-            TransactionResponse response = executeWithdraw(accountId, userId, amount, description);
+            Optional<Account> updated = accountBalanceRepository.withdraw(accountId, userId, money);
+            if (updated.isEmpty()) {
+                // The atomic update matched nothing: either no such account, the account isn't
+                // yours, or balance < amount. Only the last case is "insufficient funds".
+                if (!accountRepository.existsByIdAndUserId(accountId, userId)) {
+                    throw accountNotFound(accountId);
+                }
+                log.info("Withdrawal rejected for account id={}: insufficient funds", accountId);
+                throw new InsufficientFundsException();
+            }
+            balanceMutated = true;
+            TransactionResponse response =
+                    recordTransaction(accountId, TransactionType.WITHDRAWAL, money, updated.get(), description);
             idempotencyService.markCompleted(claim.getId(), response.id(), null);
             return response;
         } catch (RuntimeException ex) {
-            idempotencyService.release(claim.getId());
+            if (!balanceMutated) {
+                idempotencyService.release(claim.getId());
+            } else {
+                log.warn("Withdrawal partially completed for idempotency claim {}: balance mutated but a "
+                        + "later step failed; claim left IN_PROGRESS", claim.getId());
+            }
             throw ex;
         }
     }
@@ -119,6 +160,35 @@ public class TransactionService {
         }
 
         return recordTransaction(accountId, TransactionType.WITHDRAWAL, money, updated.get(), description);
+    }
+
+    // A COMPLETED record means this exact key finished before. Replay the original result only
+    // when the stored fingerprint matches this request's fingerprint; a mismatch means the
+    // client reused the key for a genuinely different request -> 409, never a silent replay.
+    private TransactionResponse replayIfFingerprintMatches(IdempotencyRecord claim, String fingerprint) {
+        String stored = claim.getRequestFingerprint();
+        if (stored == null) {
+            // Legacy record written before fingerprinting existed: reconstruct the fingerprint
+            // from the immutable transaction row it points to, persist it, then enforce.
+            stored = backfillFingerprint(claim);
+        }
+        if (!stored.equals(fingerprint)) {
+            log.info("Idempotency key conflict for claim id={}: same key, different request payload",
+                    claim.getId());
+            throw new IdempotencyKeyConflictException();
+        }
+        return replay(claim);
+    }
+
+    private String backfillFingerprint(IdempotencyRecord claim) {
+        Transaction transaction = transactionRepository.findById(claim.getResultTransactionId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Idempotency record references a missing transaction: " + claim.getResultTransactionId()));
+        // The transaction row stores exactly the normalized fields the original request was
+        // fingerprinted with, so this reconstructs the identical fingerprint.
+        String fingerprint = IdempotencyFingerprint.of(transaction.getAccountId(), transaction.getType(),
+                transaction.getAmount(), transaction.getDescription());
+        return idempotencyService.ensureFingerprint(claim.getId(), fingerprint);
     }
 
     // Reconstructs the ORIGINAL response from the Transaction row that the first (successful)
