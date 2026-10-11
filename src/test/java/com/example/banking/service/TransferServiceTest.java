@@ -37,6 +37,9 @@ import com.example.banking.repository.TransactionRepository;
 // partial. Real rollback (the sender's debit being undone in the database) is exercised by
 // @Transactional against PostgreSQL, where it works on any installation (no replica set
 // needed, unlike the previous MongoDB implementation).
+//
+// All calls below pass null as the idempotency key, exercising the non-idempotent path;
+// idempotent behavior has its own test class (TransferIdempotencyTest).
 @ExtendWith(MockitoExtension.class)
 class TransferServiceTest {
 
@@ -54,11 +57,15 @@ class TransferServiceTest {
     @Mock
     private TransactionRepository transactionRepository;
 
+    @Mock
+    private IdempotencyService idempotencyService;
+
     private TransferService transferService;
 
     @BeforeEach
     void setUp() {
-        transferService = new TransferService(accountBalanceRepository, accountRepository, transactionRepository);
+        transferService = new TransferService(accountBalanceRepository, accountRepository, transactionRepository,
+                idempotencyService);
     }
 
     private Account account(String userId, String balance) {
@@ -81,7 +88,7 @@ class TransferServiceTest {
         when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
 
         TransferResponse response = transferService.transfer(FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID,
-                new BigDecimal("100.00"), "rent split");
+                new BigDecimal("100.00"), "rent split", null);
 
         assertEquals(FROM_ACCOUNT_ID, response.fromAccountId());
         assertEquals(TO_ACCOUNT_ID, response.toAccountId());
@@ -109,7 +116,7 @@ class TransferServiceTest {
         when(accountRepository.existsByIdAndUserId(FROM_ACCOUNT_ID, "someone-else")).thenReturn(false);
 
         assertThrows(ResourceNotFoundException.class, () -> transferService.transfer(
-                FROM_ACCOUNT_ID, "someone-else", TO_ACCOUNT_ID, new BigDecimal("10.00"), null));
+                FROM_ACCOUNT_ID, "someone-else", TO_ACCOUNT_ID, new BigDecimal("10.00"), null, null));
 
         verify(accountBalanceRepository, never()).deposit(any(), any(), any());
         verify(transactionRepository, never()).save(any(Transaction.class));
@@ -120,7 +127,7 @@ class TransferServiceTest {
         when(accountRepository.findById(TO_ACCOUNT_ID)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class, () -> transferService.transfer(
-                FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID, new BigDecimal("10.00"), null));
+                FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID, new BigDecimal("10.00"), null, null));
 
         // Receiver is checked FIRST, so a missing receiver must never touch the sender's balance.
         verify(accountBalanceRepository, never()).withdraw(any(), any(), any());
@@ -130,7 +137,7 @@ class TransferServiceTest {
     @Test
     void transfer_selfTransfer_throwsInvalidRequest_beforeTouchingAnyAccount() {
         assertThrows(InvalidRequestException.class, () -> transferService.transfer(
-                FROM_ACCOUNT_ID, SENDER_USER_ID, FROM_ACCOUNT_ID, new BigDecimal("10.00"), null));
+                FROM_ACCOUNT_ID, SENDER_USER_ID, FROM_ACCOUNT_ID, new BigDecimal("10.00"), null, null));
 
         verify(accountRepository, never()).findById(any());
         verify(accountBalanceRepository, never()).withdraw(any(), any(), any());
@@ -146,7 +153,7 @@ class TransferServiceTest {
         when(accountRepository.existsByIdAndUserId(FROM_ACCOUNT_ID, SENDER_USER_ID)).thenReturn(true);
 
         assertThrows(InsufficientFundsException.class, () -> transferService.transfer(
-                FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID, new BigDecimal("999.00"), null));
+                FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID, new BigDecimal("999.00"), null, null));
 
         verify(accountBalanceRepository, never()).deposit(any(), any(), any());
         verify(transactionRepository, never()).save(any(Transaction.class));
@@ -166,7 +173,7 @@ class TransferServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class, () -> transferService.transfer(
-                FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID, new BigDecimal("100.00"), null));
+                FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID, new BigDecimal("100.00"), null, null));
 
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -174,7 +181,7 @@ class TransferServiceTest {
     @Test
     void transfer_nonPositiveAmount_isRejectedBeforeTouchingTheDatabase() {
         assertThrows(IllegalArgumentException.class, () -> transferService.transfer(
-                FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID, BigDecimal.ZERO, null));
+                FROM_ACCOUNT_ID, SENDER_USER_ID, TO_ACCOUNT_ID, BigDecimal.ZERO, null, null));
 
         verify(accountRepository, never()).findById(any());
     }

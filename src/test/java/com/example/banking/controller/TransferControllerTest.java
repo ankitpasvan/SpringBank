@@ -2,6 +2,7 @@ package com.example.banking.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -23,6 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.example.banking.dto.TransferResponse;
 import com.example.banking.exception.GlobalExceptionHandler;
+import com.example.banking.exception.IdempotencyKeyConflictException;
 import com.example.banking.exception.InsufficientFundsException;
 import com.example.banking.exception.InvalidRequestException;
 import com.example.banking.exception.ResourceNotFoundException;
@@ -60,7 +62,7 @@ class TransferControllerTest {
 
     @Test
     void transfer_validRequest_returns201_andForwardsAuthenticatedUserIdToService() throws Exception {
-        when(transferService.transfer("acc-1", "user-1", "acc-2", new BigDecimal("100.00"), "rent split"))
+        when(transferService.transfer("acc-1", "user-1", "acc-2", new BigDecimal("100.00"), "rent split", null))
                 .thenReturn(sampleResponse());
 
         mockMvc.perform(post(URL).principal(principal("user-1"))
@@ -73,6 +75,35 @@ class TransferControllerTest {
                 .andExpect(jsonPath("$.toAccountId").value("acc-2"))
                 .andExpect(jsonPath("$.amount").exists())
                 .andExpect(jsonPath("$.senderBalanceAfter").exists());
+    }
+
+    @Test
+    void transfer_idempotencyKeyHeader_isForwardedToService() throws Exception {
+        when(transferService.transfer(eq("acc-1"), eq("user-1"), eq("acc-2"), eq(new BigDecimal("100.00")),
+                eq("rent split"), eq("key-123")))
+                .thenReturn(sampleResponse());
+
+        mockMvc.perform(post(URL).principal(principal("user-1"))
+                        .header("Idempotency-Key", "key-123")
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                {"toAccountId":"acc-2","amount":100.00,"description":"rent split"}
+                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.transactionId").value("tx-1"));
+    }
+
+    @Test
+    void transfer_idempotencyKeyConflict_returns409() throws Exception {
+        when(transferService.transfer(eq("acc-1"), eq("user-1"), eq("acc-2"), any(BigDecimal.class), any(),
+                eq("key-123")))
+                .thenThrow(new IdempotencyKeyConflictException());
+
+        mockMvc.perform(post(URL).principal(principal("user-1"))
+                        .header("Idempotency-Key", "key-123")
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                {"toAccountId":"acc-2","amount":100.00}
+                """))
+                .andExpect(status().isConflict());
     }
 
     @Test
@@ -115,7 +146,8 @@ class TransferControllerTest {
     void transfer_selfTransfer_returns400() throws Exception {
         // The controller forwards whatever toAccountId the client sent - it is
         // TransferService that detects "same account" and rejects it.
-        when(transferService.transfer(eq("acc-1"), eq("user-1"), eq("acc-1"), any(BigDecimal.class), any()))
+        when(transferService.transfer(eq("acc-1"), eq("user-1"), eq("acc-1"), any(BigDecimal.class), any(),
+                isNull()))
                 .thenThrow(new InvalidRequestException("Cannot transfer to the same account"));
 
         mockMvc.perform(post(URL).principal(principal("user-1"))
@@ -130,7 +162,8 @@ class TransferControllerTest {
     void transfer_senderNotOwner_returns404() throws Exception {
         // "someone-else" is authenticated (a valid token), but does not own "acc-1" - the
         // controller still forwards their own true id, and the service reports "not found".
-        when(transferService.transfer(eq("acc-1"), eq("someone-else"), eq("acc-2"), any(BigDecimal.class), any()))
+        when(transferService.transfer(eq("acc-1"), eq("someone-else"), eq("acc-2"), any(BigDecimal.class), any(),
+                isNull()))
                 .thenThrow(new ResourceNotFoundException("Account not found with id: acc-1"));
 
         mockMvc.perform(post(URL).principal(principal("someone-else"))
@@ -143,7 +176,8 @@ class TransferControllerTest {
 
     @Test
     void transfer_receiverNotFound_returns404() throws Exception {
-        when(transferService.transfer(eq("acc-1"), eq("user-1"), eq("ghost"), any(BigDecimal.class), any()))
+        when(transferService.transfer(eq("acc-1"), eq("user-1"), eq("ghost"), any(BigDecimal.class), any(),
+                isNull()))
                 .thenThrow(new ResourceNotFoundException("Account not found with id: ghost"));
 
         mockMvc.perform(post(URL).principal(principal("user-1"))
@@ -156,7 +190,8 @@ class TransferControllerTest {
 
     @Test
     void transfer_insufficientFunds_returns422() throws Exception {
-        when(transferService.transfer(eq("acc-1"), eq("user-1"), eq("acc-2"), any(BigDecimal.class), any()))
+        when(transferService.transfer(eq("acc-1"), eq("user-1"), eq("acc-2"), any(BigDecimal.class), any(),
+                isNull()))
                 .thenThrow(new InsufficientFundsException());
 
         mockMvc.perform(post(URL).principal(principal("user-1"))

@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,11 +27,18 @@ public class TransferController {
         this.transferService = transferService;
     }
 
+    /**
+     * @param idempotencyKey optional, consistent with deposit/withdraw. When supplied, a
+     *                       retry with the same key and identical parameters replays the
+     *                       first transfer instead of moving money again; the same key with
+     *                       different parameters is rejected with 409 Conflict.
+     */
     @PostMapping("/transfer")
     @ResponseStatus(HttpStatus.CREATED)
     public TransferResponse transfer(Principal principal, @PathVariable("accountId") String accountId,
-                                     @Valid @RequestBody TransferRequest request) {
+                                     @Valid @RequestBody TransferRequest request,
+                                     @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         return transferService.transfer(accountId, principal.getName(), request.toAccountId(), request.amount(),
-                request.description());
+                request.description(), idempotencyKey);
     }
 }

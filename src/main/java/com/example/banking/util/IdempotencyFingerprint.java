@@ -41,6 +41,30 @@ public final class IdempotencyFingerprint {
         return sha256Hex(canonical);
     }
 
+    /**
+     * Fingerprint for a transfer request.
+     *
+     * @param fromAccountId sender account (never null)
+     * @param toAccountId   receiver account (never null). Part of the fingerprint so the
+     *                      same key + same amount aimed at a DIFFERENT receiver is a 409
+     *                      conflict, never a silent replay of the first transfer.
+     * @param amount        already normalized to scale 2 via the service's normalize()
+     * @param description   may be null, treated as empty
+     * @return lowercase hex SHA-256 of the canonical request representation
+     */
+    public static String ofTransfer(String fromAccountId, String toAccountId, BigDecimal amount,
+                                    String description) {
+        if (fromAccountId == null || toAccountId == null || amount == null) {
+            throw new IllegalArgumentException("Fingerprint fields must not be null");
+        }
+        String canonical = field(fromAccountId)
+                + field("TRANSFER")
+                + field(toAccountId)
+                + field(amount.toPlainString())
+                + field(description == null ? "" : description);
+        return sha256Hex(canonical);
+    }
+
     private static String field(String value) {
         return value.length() + ":" + value + ";";
     }
