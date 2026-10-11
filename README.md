@@ -1,318 +1,335 @@
-SpringBank — Banking System REST API
-A production-style Spring Boot REST API for a banking system: JWT authentication, account
-management, deposits, withdrawals, atomic transfers, transaction history, and idempotent
-money operations — backed by PostgreSQL with JPA.
-Built to demonstrate real backend engineering concerns: transaction safety, concurrency
-control, idempotent retries, and ownership-based authorization.
-Key features
-JWT authentication — register/login with BCrypt-hashed passwords; stateless HS256
-  tokens (1-hour default lifetime).
-Account management — create SAVINGS/CURRENT accounts, list and view your accounts.
-Deposits & withdrawals — balance-guarded, pessimistic-locked single-account operations.
-Atomic transfers — debit + credit + both ledger entries in one database transaction;
-  a failure anywhere rolls everything back.
-Idempotency keys — optional Idempotency-Key header on deposit, withdraw and
-  transfer: safe retries never move money twice; key reuse with different parameters is
-  rejected with 409.
-Transaction history — paginated, filterable ledger (by type and date range).
-Ownership-based authorization — you can only touch your own accounts; anything else
-  looks like 404 (no account-id probing).
-Consistent errors — one JSON error shape for every failure, plus field-level
-  validation messages.
-Swagger UI — interactive API docs with a JWT "Authorize" button.
-Technology stack
-Area
-Choice
-Language
-Java 21
-Framework
-Spring Boot 4.1.1 — Web, Data JPA, Validation, Security
-Database
-PostgreSQL (runtime) · H2 in-memory (tests)
-Security
-Spring Security, JJWT (HS256), BCrypt
-API docs
-springdoc-openapi 3.1.1 (Swagger UI)
-Money
-BigDecimal, scale 2, persisted as NUMERIC(19,2)
-Build
-Maven — wrapper (mvnw) included, no install needed
-Tests
-JUnit 5, Mockito, MockMvc, @DataJpaTest
-Architecture and project structure
-Layered design — controller → service → repository — with DTO records at the API
-boundary (JPA entities never leak to clients).
+# 🏦 SpringBank — Banking System REST API
+
+<p align="center">
+  <strong>A secure, transaction-safe banking backend built with Java and Spring Boot.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Java-21-orange?style=for-the-badge&logo=openjdk" alt="Java 21" />
+  <img src="https://img.shields.io/badge/Spring_Boot-4.1.1-6DB33F?style=for-the-badge&logo=springboot&logoColor=white" alt="Spring Boot" />
+  <img src="https://img.shields.io/badge/PostgreSQL-Database-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/JWT-Authentication-black?style=for-the-badge&logo=jsonwebtokens" alt="JWT" />
+</p>
+
+SpringBank is a REST API for banking operations, including authentication, account management, deposits, withdrawals, fund transfers, and transaction history.
+
+The project focuses on backend engineering fundamentals such as **transaction management, concurrency control, idempotency, and ownership-based authorization**.
+
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---|---|
+| 🔐 Authentication | JWT-based registration and login with BCrypt password hashing |
+| 🏦 Account Management | Create, list, and view savings or current accounts |
+| 💰 Deposits & Withdrawals | Validated balance operations with pessimistic locking |
+| 🔄 Fund Transfers | Atomic debit, credit, and ledger updates |
+| 🛡️ Idempotency | Safe retries for supported money operations |
+| 📜 Transaction History | Paginated history with type and date filters |
+| 🔒 Authorization | Users can access only their own accounts |
+| ⚠️ Error Handling | Consistent JSON errors and validation messages |
+| 📘 API Documentation | Interactive Swagger UI with JWT authorization |
+
+## 🧰 Tech Stack
+
+<p>
+  <img src="https://img.shields.io/badge/Java-21-orange?logo=openjdk" alt="Java" />
+  <img src="https://img.shields.io/badge/Spring_Boot-4.1.1-6DB33F?logo=springboot" alt="Spring Boot" />
+  <img src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/Spring_Security-6DB33F?logo=springsecurity&logoColor=white" alt="Spring Security" />
+  <img src="https://img.shields.io/badge/Maven-C71A36?logo=apachemaven&logoColor=white" alt="Maven" />
+  <img src="https://img.shields.io/badge/JUnit_5-25A162?logo=junit5&logoColor=white" alt="JUnit 5" />
+</p>
+
+- **Language:** Java 21
+- **Framework:** Spring Boot
+- **Database:** PostgreSQL with Spring Data JPA
+- **Security:** Spring Security, JWT, BCrypt
+- **API Documentation:** Springdoc OpenAPI / Swagger UI
+- **Testing:** JUnit 5, Mockito, MockMvc, H2
+- **Build Tool:** Maven Wrapper
+- **Containerization:** Docker
+
+## 🏗️ Architecture
+
+SpringBank follows a layered architecture that separates HTTP handling, business logic, persistence, and security.
+
+```text
+Client
+  │
+  ▼
+REST Controllers
+  │
+  ▼
+Service Layer
+  │
+  ▼
+Spring Data JPA Repositories
+  │
+  ▼
+PostgreSQL Database
+```
+
+### Project Structure
+
+```text
 src/main/java/com/example/banking/
-├── BankingSystemApplication.java      # entry point; @EnableScheduling (idempotency cleanup)
-├── config/
-│   ├── SecurityConfig.java            # stateless JWT filter chain; /api/auth/** + Swagger public
-│   └── OpenApiConfig.java             # Swagger "Authorize" button (JWT bearer scheme)
-├── controller/                        # REST endpoints, @Valid DTOs, no business logic
-│   ├── AuthController.java            # POST /api/auth/register, /login
-│   ├── UserController.java            # GET / PUT /api/users/me
-│   ├── AccountController.java         # POST / GET /api/accounts, GET /api/accounts/{id}
-│   ├── TransactionController.java     # POST /api/accounts/{accountId}/deposit, /withdraw
-│   ├── TransferController.java        # POST /api/accounts/{accountId}/transfer
-│   └── TransactionHistoryController.java  # GET /api/accounts/{accountId}/transactions
-├── dto/                               # request/response records + validation annotations
-├── exception/                         # domain exceptions, GlobalExceptionHandler
-├── model/                             # JPA entities: User, Account, Transaction, IdempotencyRecord
-├── repository/                        # Spring Data JPA + locked balance operations
-├── security/                          # JwtService, JwtAuthenticationFilter, entry point
-├── service/                           # UserService, AccountService, TransactionService,
-│                                      # TransferService, TransactionHistoryService, IdempotencyService
-└── util/                              # AccountNumberGenerator, IdempotencyFingerprint (SHA-256)
-Notable engineering decisions:
-Transfer atomicity — TransferService is @Transactional: sender debit, receiver
-  credit and both ledger rows commit or roll back together. Plain PostgreSQL handles this
-  on any installation (no replica set required).
-No overdrafts under concurrency — balance updates load the account row with
-  PESSIMISTIC_WRITE and re-check ownership + funds while the lock is held.
-Idempotency without races — a unique constraint on (userId, idempotencyKey) lets
-  the database serialize duplicate requests; the claim is committed in its own
-  transaction so a concurrent retry gets 409 immediately instead of blocking. A SHA-256
-  fingerprint of the normalized request tells genuine retries apart from key reuse with
-  different parameters.
-Prerequisites
-JDK 21
-PostgreSQL 14+ (local or reachable)
-No Maven install needed — the project ships the Maven Wrapper.
-  These docs use .\mvnw.cmd (Windows); on macOS/Linux use ./mvnw.
-Environment variables
-All secrets come from environment variables — never commit real values.
-Variable
-Default
-Purpose
-DATABASE_URL
-jdbc:postgresql://localhost:5432/banking
-JDBC URL of the PostgreSQL database
-DATABASE_USERNAME
-postgres
-Database user
-DATABASE_PASSWORD
-postgres
-Database password (set your own)
-DDL_AUTO
-update
-Hibernate schema mode (update = dev)
-JWT_SECRET
-(empty — app fails fast with a clear error)
-Base64 secret, decodes to ≥ 32 bytes
-JWT_EXPIRATION_MS
-3600000 (1 hour)
-Token lifetime in milliseconds
-Generate a signing secret (run once, keep it private):
-[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
-Database setup and configuration
-Create the database once:
--- in psql, or: createdb -U postgres banking
+├── config/        # Security and OpenAPI configuration
+├── controller/    # REST API endpoints
+├── dto/           # Request and response objects
+├── exception/     # Custom exceptions and error handling
+├── model/         # JPA entities
+├── repository/    # Database access
+├── security/      # JWT authentication
+├── service/       # Banking business logic
+└── util/          # Account number and idempotency utilities
+```
+
+### Engineering Highlights
+
+- **Atomic transfers:** Sender debit, receiver credit, and ledger entries execute in one database transaction.
+- **Concurrency safety:** Pessimistic write locks protect balance-changing operations.
+- **Idempotent operations:** Request fingerprints help distinguish legitimate retries from reused keys with different parameters.
+- **Ownership checks:** Account access is restricted to the authenticated owner.
+
+---
+
+## ⚙️ Getting Started
+
+### Prerequisites
+
+- Java Development Kit (JDK) 21
+- PostgreSQL 14 or later
+- Git
+- Docker Desktop (optional)
+
+Maven does not need to be installed separately because the project includes the Maven Wrapper.
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/ankitpasvan/banking-system.git
+cd banking-system
+```
+
+> Replace the repository URL above if your actual GitHub repository uses a different URL.
+
+### 2. Create the Database
+
+Open PostgreSQL and run:
+
+```sql
 CREATE DATABASE banking;
-Hibernate creates/updates the schema automatically on startup (DDL_AUTO=update) —
-convenient for development. For production, set DDL_AUTO=validate and manage the
-schema with a migration tool such as Flyway or Liquibase.
-Local installation and startup (Windows)
-cd E:\banking-system
+```
 
-# 1. Set secrets for this session
-$env:DATABASE_PASSWORD = "<your-postgres-password>"
-$env:JWT_SECRET = "<output-of-the-generator-above>"
+### 3. Configure Environment Variables
 
-# 2. Verify everything first (recommended)
+In Windows PowerShell, set the values for your current terminal session:
+
+```powershell
+$env:DATABASE_URL = "jdbc:postgresql://localhost:5432/banking"
+$env:DATABASE_USERNAME = "your_db_username"
+$env:DATABASE_PASSWORD = "your_db_password"
+$env:JWT_SECRET = "your_base64_encoded_secret"
+$env:JWT_EXPIRATION_MS = "3600000"
+```
+
+Generate a Base64-encoded secret containing 32 random bytes:
+
+```powershell
+$bytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+[Convert]::ToBase64String($bytes)
+$rng.Dispose()
+```
+
+Copy the generated value into `JWT_SECRET`. Keep it private and never commit it to Git.
+
+### 4. Run Tests
+
+```powershell
 .\mvnw.cmd clean test
+```
 
-# 3. Start the API
+### 5. Start the Application
+
+```powershell
 .\mvnw.cmd spring-boot:run
-The API listens on http://localhost:8080.
-Docker setup
-The Dockerfile packages the pre-built jar on a Java 21 JRE:
-FROM eclipse-temurin:21-jre
-WORKDIR /app
-COPY target/banking-system-0.0.1-SNAPSHOT.jar app.jar
-EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
-# 1. Build the jar (the Dockerfile copies it from target\)
+```
+
+The API runs at:
+
+**http://localhost:8080**
+
+---
+
+## 🐳 Run with Docker
+
+Build the application first:
+
+```powershell
 .\mvnw.cmd clean package -DskipTests
-
-# 2. Build the image
 docker build -t springbank .
+```
 
-# 3. Run it (host.docker.internal reaches host PostgreSQL on Docker Desktop)
+Start the container:
+
+```powershell
 docker run -p 8080:8080 `
-  -e DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/banking `
-  -e DATABASE_USERNAME=postgres `
-  -e DATABASE_PASSWORD="<your-postgres-password>" `
-  -e JWT_SECRET="<your-jwt-secret>" `
+  -e DATABASE_URL="jdbc:postgresql://host.docker.internal:5432/banking" `
+  -e DATABASE_USERNAME="your_db_username" `
+  -e DATABASE_PASSWORD="your_db_password" `
+  -e JWT_SECRET="your_base64_encoded_secret" `
+  -e JWT_EXPIRATION_MS="3600000" `
   springbank
-Notes:
-The repo has no compose file or .dockerignore; the commands above are the complete
-  flow the current Dockerfile supports.
-The container needs a reachable PostgreSQL: on the host (as above) or a sibling
-  container on the same Docker network (jdbc:postgresql://<name>:5432/banking).
-Swagger / OpenAPI documentation
-Swagger UI: http://localhost:8080/swagger-ui.html (public)
-OpenAPI JSON: http://localhost:8080/v3/api-docs (public)
-Trying authenticated endpoints in the UI: call POST /api/auth/login, copy token,
-click Authorize, enter Bearer <token>.
-API endpoints
-Base URL http://localhost:8080. Everything except POST /api/auth/** requires
-Authorization: Bearer <token>.
-Method
-Path
-Description
-POST
-/api/auth/register
-Register (public) → 201
-POST
-/api/auth/login
-Login (public) → 200 + JWT
-GET
-/api/users/me
-Current user profile
-PUT
-/api/users/me
-Update profile name
-POST
-/api/accounts
-Create account → 201
-GET
-/api/accounts
-List my accounts
-GET
-/api/accounts/{id}
-One account (404 if not mine)
-POST
-/api/accounts/{accountId}/deposit
-Deposit → 201
-POST
-/api/accounts/{accountId}/withdraw
-Withdraw → 201 (422 if short)
-POST
-/api/accounts/{accountId}/transfer
-Transfer → 201
-GET
-/api/accounts/{accountId}/transactions
-Paginated history (filters below)
-History query params: type (DEPOSIT/WITHDRAWAL/TRANSFER_IN/TRANSFER_OUT),
-from/to (YYYY-MM-DD), page (default 0), size (default 20, max 100).
-Example requests and responses
-Register — POST /api/auth/register → 201
-// request
-{ "name": "Ankit", "email": "ankit@example.com", "password": "secret123" }
+```
 
-// response (no token here — log in next)
-{ "id": "u1", "name": "Ankit", "email": "ankit@example.com", "createdAt": "2026-10-11T10:00:00Z" }
-Login — POST /api/auth/login → 200
-// request
-{ "email": "ankit@example.com", "password": "secret123" }
+This example assumes PostgreSQL is running on the Windows host and is reachable from Docker Desktop.
 
-// response
-{
-  "token": "<jwt>",
-  "user": { "id": "u1", "name": "Ankit", "email": "ankit@example.com", "createdAt": "2026-10-11T10:00:00Z" }
-}
-Create account — POST /api/accounts → 201
-// request
-{ "accountType": "SAVINGS" }
+---
 
-// response
-{
-  "id": "acc-1", "accountNumber": "123456789012", "userId": "u1",
-  "accountType": "SAVINGS", "balance": 0.00, "createdAt": "2026-10-11T10:05:00Z"
-}
-Deposit — POST /api/accounts/acc-1/deposit → 201
-// request
-{ "amount": 500.00, "description": "salary" }
+## 📘 API Documentation
 
-// response
-{
-  "id": "tx-9", "accountId": "acc-1", "type": "DEPOSIT",
-  "amount": 500.00, "balanceAfter": 1500.00,
-  "description": "salary", "createdAt": "2026-10-11T10:06:00Z"
-}
-Transfer — POST /api/accounts/acc-1/transfer → 201
-// request
-{ "toAccountId": "acc-2", "amount": 100.00, "description": "rent split" }
+Once the application is running, open:
 
-// response
+| Resource | URL |
+|---|---|
+| Swagger UI | [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html) |
+| OpenAPI JSON | [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs) |
+
+Use the Swagger **Authorize** button to test authenticated endpoints with a JWT obtained from the login endpoint.
+
+## 🔌 API Endpoints
+
+All endpoints except registration and login require a valid bearer token.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Register a user |
+| `POST` | `/api/auth/login` | Authenticate and receive a JWT |
+| `GET` | `/api/users/me` | View the current user profile |
+| `PUT` | `/api/users/me` | Update the profile name |
+| `POST` | `/api/accounts` | Create an account |
+| `GET` | `/api/accounts` | List your accounts |
+| `GET` | `/api/accounts/{id}` | View an account |
+| `POST` | `/api/accounts/{accountId}/deposit` | Deposit funds |
+| `POST` | `/api/accounts/{accountId}/withdraw` | Withdraw funds |
+| `POST` | `/api/accounts/{accountId}/transfer` | Transfer funds |
+| `GET` | `/api/accounts/{accountId}/transactions` | View transaction history |
+
+### Example: Create an Account
+
+**Request**
+
+```http
+POST /api/accounts
+Authorization: Bearer <your-jwt>
+Content-Type: application/json
+```
+
+```json
 {
-  "transactionId": "tx-10", "fromAccountId": "acc-1", "toAccountId": "acc-2",
-  "amount": 100.00, "senderBalanceAfter": 1400.00,
-  "description": "rent split", "createdAt": "2026-10-11T10:07:00Z"
+  "accountType": "SAVINGS"
 }
-History — GET /api/accounts/acc-1/transactions?type=DEPOSIT&page=0&size=20 → 200
+```
+
+**Example response**
+
+```json
 {
-  "content": [ { "id": "tx-9", "accountId": "acc-1", "type": "DEPOSIT",
-                 "amount": 500.00, "balanceAfter": 1500.00, "description": "salary",
-                 "createdAt": "2026-10-11T10:06:00Z" } ],
-  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+  "accountType": "SAVINGS"
 }
-Authentication, JWT and authorization
-POST /api/auth/register and POST /api/auth/login are public; every other endpoint
-  needs Authorization: Bearer <jwt>.
-Passwords are BCrypt-hashed; tokens are HS256-signed with JWT_SECRET, valid for
-  JWT_EXPIRATION_MS (default 1 hour).
-Login never reveals whether an email is registered — unknown email and wrong password
-  produce the identical 401.
-Authorization is ownership-based: account endpoints verify the account belongs to the
-  caller. Someone else's account returns 404, not 403, so account ids can't be probed.
-Error handling and validation
-Every error uses the same JSON shape (fieldErrors only for validation failures):
+```
+
+> The response fields shown above are illustrative. Refer to the actual DTO and Swagger schema for the complete response structure.
+
+### Example: Transfer Funds
+
+**Request**
+
+```http
+POST /api/accounts/acc-1/transfer
+Authorization: Bearer <your-jwt>
+Content-Type: application/json
+Idempotency-Key: transfer-unique-001
+```
+
+```json
 {
-  "timestamp": "2026-10-11T10:15:30Z",
-  "status": 409,
-  "error": "Conflict",
-  "message": "Idempotency key was already used with different request parameters",
-  "path": "/api/accounts/acc-1/transfer",
-  "fieldErrors": {}
+  "toAccountId": "acc-2",
+  "amount": 100.00,
+  "description": "Shared expenses"
 }
-Status
-When
-400
-Validation failed — e.g. { "fieldErrors": { "amount": "Amount must be at least 0.01" } }
-401
-Missing, invalid or expired JWT
-404
-Account/user/transaction not found — including "not yours"
-409
-Idempotency conflict, or key already in use by a running request
-422
-Insufficient funds
-500
-Unexpected server error
-Validation rules (enforced by Jakarta annotations on the DTOs): amount 0.01–1000000.00
-with at most 2 decimals; required fields non-blank; description ≤ 100 chars; transfers
-can't target the same account.
-Idempotency
-POST .../deposit, .../withdraw and .../transfer accept an optional
-Idempotency-Key header. Without it, behavior is unchanged.
-Scenario
-Result
-First request with key K
-Executes normally (201)
-Retry: same key K, identical parameters
-Replays the first result — money never moves twice
-Same key K, different parameters
-409 Conflict
-Same key K while the first request is still running
-409 Conflict
-Keys are scoped per user and expire after 24 hours (hourly cleanup). A failed operation
-releases its key immediately, so the same key can be retried straight away.
-Testing
+```
+
+Use a unique idempotency key for each new operation. Reuse the same key when retrying the same request.
+
+---
+
+## 🔐 Security
+
+- Passwords are hashed using BCrypt.
+- JWTs use HS256 signing and have a configurable expiration.
+- Authenticated users can access only their own accounts.
+- Invalid or expired tokens are rejected.
+- Database credentials and JWT secrets should be supplied through environment variables.
+
+## 🔁 Idempotency
+
+Deposit, withdrawal, and transfer operations support an optional `Idempotency-Key` header.
+
+| Scenario | Expected behavior |
+|---|---|
+| First request with a new key | Operation executes |
+| Retry with the same key and same parameters | Previous result is replayed |
+| Same key with different parameters | `409 Conflict` |
+| Same key while an operation is in progress | `409 Conflict` |
+| Failed operation that safely releases its claim | Key can be retried |
+
+Keys are scoped per user and retained for up to 24 hours, subject to the application's scheduled cleanup.
+
+## 🧪 Testing
+
+Run the full test suite:
+
+```powershell
 .\mvnw.cmd clean test
-Verified result (2026-10-11): Tests run: 188, Failures: 0, Errors: 0, Skipped: 0 — BUILD SUCCESS.
-Tests run on an in-memory H2 database; no PostgreSQL needed for the suite.
-Coverage: registration/login, profile, accounts, deposits/withdrawals, transfers,
-  history filtering + pagination, ownership rejection, JWT rejection, pessimistic-lock
-  balance safety, and idempotency (replay, conflict, in-progress, release-after-failure —
-  including a real transaction-behavior test proving the release survives a rollback).
-Current limitations and future improvements
-Schema management — DDL_AUTO=update suits development; production should use
-  validate with a migration tool (Flyway/Liquibase).
-Single-instance scheduler — the hourly idempotency cleanup assumes one app
-  instance; multiple replicas need a distributed lock (e.g. ShedLock).
-No refresh tokens — access tokens expire after an hour; clients re-authenticate.
-Account listing isn't paginated — fine at portfolio scale.
-Historical note — a fully commented-out MongoConfig.java remains in config/
-  as a reference to the pre-PostgreSQL implementation; it is not active code.
-Secrets hygiene — keep credentials in environment variables, never in the repo,
-  and rotate any credential that was ever committed.
+```
+
+**Latest reported verification — October 11, 2026**
+
+| Result | Count |
+|---|---:|
+| Tests run | 188 |
+| Failures | 0 |
+| Errors | 0 |
+| Skipped | 0 |
+| Build status | `BUILD SUCCESS` |
+
+The test suite includes authentication, account operations, transfers, transaction history, authorization, and idempotency scenarios.
+
+## 🚧 Limitations & Future Improvements
+
+- Introduce Flyway or Liquibase for database schema migrations.
+- Use a distributed lock for scheduled cleanup if deploying multiple application instances.
+- Add refresh-token support.
+- Consider pagination for account listings as data grows.
+- Configure and verify production deployment, monitoring, and secret management.
+
+---
+
+## 👨‍💻 Author
+
+**Ankit Pasvan**
+
+Full Stack Developer | Java & Spring Boot | MERN Stack
+
+- GitHub: [@ankitpasvan](https://github.com/ankitpasvan)
+
+---
+
+<p align="center">
+  <strong>Built to demonstrate secure API design, transaction safety, and backend engineering fundamentals.</strong>
+</p>
