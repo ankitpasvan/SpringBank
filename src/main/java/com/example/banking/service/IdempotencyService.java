@@ -138,9 +138,19 @@ public class IdempotencyService {
     /**
      * Deletes an IN_PROGRESS claim - e.g. because the operation it was guarding failed BEFORE
      * any money moved (unknown account, insufficient funds, ...). This lets a later retry
-     * with the same key start cleanly instead of being permanently stuck. Callers must NOT
-     * release a claim when the balance may already have changed; see TransactionService.
+     * with the same key start cleanly instead of being stuck until the 24-hour expiry.
+     * Callers must NOT release a claim when the balance may already have changed; see
+     * TransactionService.
+     *
+     * IMPLEMENTATION NOTE (PostgreSQL): this MUST run in its own REQUIRES_NEW transaction.
+     * Callers invoke release() from inside their catch block, i.e. inside a business
+     * transaction that is about to roll back. If the DELETE joined that transaction, the
+     * rollback would undo it too - while the IN_PROGRESS row (committed separately by
+     * claim()) would survive, leaving the key stuck at 409 "in progress" for up to 24
+     * hours and defeating the whole purpose of safe retries. The separate transaction
+     * makes the DELETE durable regardless of what the caller's transaction does.
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void release(String recordId) {
         idempotencyRecordRepository.deleteById(recordId);
     }
