@@ -31,8 +31,7 @@ public class AccountController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public AccountResponse createAccount(Principal principal, @Valid @RequestBody CreateAccountRequest request) {
-        // The owner is the authenticated caller (JwtAuthenticationFilter sets this as the
-        // token's userId), never a value the client could supply - see CreateAccountRequest.
+
         return accountService.createAccount(principal.getName(), request.accountType());
     }
 
@@ -43,8 +42,7 @@ public class AccountController {
 
     @GetMapping
     public List<AccountResponse> getAccountsByUserId(Principal principal) {
-        // Always the caller's own accounts - "userId" is no longer a query parameter a
-        // client could set to someone else's id (see the removed @RequestParam).
+
         return accountService.getByUserId(principal.getName());
     }
 }

@@ -38,16 +38,7 @@ import com.example.banking.repository.AccountRepository;
 import com.example.banking.repository.IdempotencyRecordRepository;
 import com.example.banking.repository.TransactionRepository;
 
-/**
- * Mock-level concurrency coverage for the idempotency claim race. A REAL
- * {@link IdempotencyService} is wired to a fake repository whose save() enforces the unique
- * (userId, idempotencyKey) constraint under a lock, exactly like MongoDB's unique index
- * would - so simultaneous claims genuinely collide and only one caller wins.
- *
- * <p>This proves the APPLICATION-level race handling (duplicate-key -> single winner).
- * It does NOT prove the real MongoDB unique index behaves the same way; that needs an
- * integration test against a real database.
- */
+
 @ExtendWith(MockitoExtension.class)
 class IdempotencyConcurrencyTest {
 

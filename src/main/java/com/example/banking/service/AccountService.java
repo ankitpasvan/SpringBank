@@ -63,13 +63,7 @@ public class AccountService {
         throw new IllegalStateException("Could not generate a unique account number");
     }
 
-    /**
-     * Returns the account only if it belongs to requesterId. If the account exists but
-     * belongs to someone else, this throws the SAME "not found" error as a truly missing
-     * account (never a distinct "forbidden" response) - otherwise a caller could tell
-     * apart "this id doesn't exist" from "this id exists but isn't yours", which leaks
-     * whether an account id is valid at all (account-id enumeration).
-     */
+
     public AccountResponse getById(String id, String requesterId) {
         Account account = accountRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found with id: " + id));

@@ -27,10 +27,6 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-// Unit test for ONLY this filter's own logic (header parsing, wiring JwtService's result
-// into the SecurityContext, writing the 401 body). JwtService is mocked here on purpose:
-// its real cryptographic behaviour is already fully covered by JwtServiceTest, so this
-// class does not need to repeat that - it only proves the filter reacts correctly.
 @ExtendWith(MockitoExtension.class)
 class JwtAuthenticationFilterTest {
 
@@ -50,9 +46,7 @@ class JwtAuthenticationFilterTest {
 
     @BeforeEach
     void setUp() {
-        // Jackson 3: ObjectMapper is built immutably via JsonMapper.builder(); findAndAddModules()
-        // picks up the JSR-310 (java.time) module from the classpath so Instant serializes correctly,
-        // regardless of whether it ships built-in or as a separate module in this Jackson 3 version.
+
         ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
         filter = new JwtAuthenticationFilter(jwtService, objectMapper);
     }

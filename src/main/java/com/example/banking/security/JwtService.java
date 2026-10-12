@@ -18,16 +18,7 @@ import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import io.jsonwebtoken.security.WeakKeyException;
 
-/**
- * Issues and validates JWTs (HS256). This class only knows about tokens: it does not
- * know about HTTP, does not touch the database, and is not wired into any controller yet
- * (that happens in Step 3 - login endpoint - and Step 4 - security filter chain).
- *
- * WHAT is a JWT here: a signed, self-contained string carrying two claims - userId and
- * email - plus an expiry time. WHY signed: anyone can read a JWT's contents (it is only
- * Base64, not encrypted), but only someone holding jwt.secret can produce a signature
- * that this class will accept, so a client cannot forge or edit a token undetected.
- */
+
 @Component
 public class JwtService {
 

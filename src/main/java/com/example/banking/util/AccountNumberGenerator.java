@@ -4,10 +4,7 @@ import java.security.SecureRandom;
 
 import org.springframework.stereotype.Component;
 
-/**
- * Generates 12-digit account numbers that never start with 0.
- * SecureRandom is used so numbers are not predictable.
- */
+
 @Component
 public class AccountNumberGenerator {
 

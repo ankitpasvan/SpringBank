@@ -12,13 +12,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-/**
- * Called by Spring Security whenever a request reaches a protected endpoint
- * without being authenticated.
- *
- * This class returns the same JSON error format used by the rest of the API
- * instead of Spring Security's default 401 response.
- */
+
 @Component
 public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
 

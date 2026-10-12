@@ -13,10 +13,7 @@ import jakarta.persistence.Table;
 
 import org.hibernate.annotations.UuidGenerator;
 
-/**
- * One row of the account statement, stored in the "transactions" table.
- * A transaction is never updated or deleted after it is written (it is a ledger entry).
- */
+
 @Entity
 @Table(name = "transactions", indexes = {
         // Serves the history query: "all transactions of one account, newest first".

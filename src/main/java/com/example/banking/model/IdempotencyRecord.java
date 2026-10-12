@@ -13,28 +13,6 @@ import jakarta.persistence.UniqueConstraint;
 
 import org.hibernate.annotations.UuidGenerator;
 
-/**
- * Tracks one client-supplied "Idempotency-Key" for one user, so a retried request can be
- * detected and replayed instead of re-executed. Stored in the "idempotency_records" table.
- *
- * WHY scoped to (userId, idempotencyKey): a key is only unique PER USER, never globally - two
- * different users can safely reuse the exact same key string without ever colliding, and one
- * user can never see or replay another user's result through this mechanism.
- *
- * WHY expiresAt + scheduled cleanup instead of a MongoDB TTL index: relational databases
- * have no per-document TTL. Each record carries the instant after which it may be deleted,
- * and a scheduled task (see IdempotencyService#evictExpiredRecords) removes expired rows.
- * An abandoned IN_PROGRESS record (from a genuine process crash between the claim and the
- * business operation completing) would otherwise block that key forever. This bounds crash
- * recovery to at most 24 hours rather than guaranteeing instant recovery - an acceptable,
- * explainable trade-off for this project, and the same retention window several real
- * payment APIs use for idempotency keys.
- *
- * WHY requestFingerprint: the same key reused with a DIFFERENT amount or description must be
- * rejected (409), not silently replayed. Records written before fingerprinting existed have a
- * null fingerprint and are backfilled on first replay from the transaction row they point to
- * (see TransactionService); the 24h expiry bounds how long such legacy records can exist.
- */
 @Entity
 @Table(name = "idempotency_records",
         uniqueConstraints = @UniqueConstraint(name = "user_key_idx",

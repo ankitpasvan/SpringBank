@@ -7,29 +7,13 @@ import java.security.NoSuchAlgorithmException;
 
 import com.example.banking.model.TransactionType;
 
-/**
- * Builds a stable SHA-256 fingerprint of an idempotent money request, so that reusing an
- * idempotency key with a DIFFERENT payload can be told apart from a genuine retry.
- *
- * WHY this canonical form: the fingerprint must treat "100", "100.0" and "100.00" as the
- * same amount (callers normalize to scale 2 before calling), while any real difference in
- * account, operation, amount or description must produce a different fingerprint. Fields
- * are length-prefixed so the encoding is unambiguous no matter what the values contain,
- * then hashed so the stored record never keeps raw request details beyond what the
- * transaction row already stores.
- */
+
 public final class IdempotencyFingerprint {
 
     private IdempotencyFingerprint() {
     }
 
-    /**
-     * @param accountId   the account the money moves on (never null)
-     * @param type        DEPOSIT or WITHDRAWAL (never null)
-     * @param amount      already normalized to scale 2 via the service's normalize()
-     * @param description may be null, treated as empty
-     * @return lowercase hex SHA-256 of the canonical request representation
-     */
+
     public static String of(String accountId, TransactionType type, BigDecimal amount, String description) {
         if (accountId == null || type == null || amount == null) {
             throw new IllegalArgumentException("Fingerprint fields must not be null");
@@ -41,17 +25,7 @@ public final class IdempotencyFingerprint {
         return sha256Hex(canonical);
     }
 
-    /**
-     * Fingerprint for a transfer request.
-     *
-     * @param fromAccountId sender account (never null)
-     * @param toAccountId   receiver account (never null). Part of the fingerprint so the
-     *                      same key + same amount aimed at a DIFFERENT receiver is a 409
-     *                      conflict, never a silent replay of the first transfer.
-     * @param amount        already normalized to scale 2 via the service's normalize()
-     * @param description   may be null, treated as empty
-     * @return lowercase hex SHA-256 of the canonical request representation
-     */
+
     public static String ofTransfer(String fromAccountId, String toAccountId, BigDecimal amount,
                                     String description) {
         if (fromAccountId == null || toAccountId == null || amount == null) {

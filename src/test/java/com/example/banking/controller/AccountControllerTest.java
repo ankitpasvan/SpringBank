@@ -28,8 +28,7 @@ import com.example.banking.exception.ResourceNotFoundException;
 import com.example.banking.model.AccountType;
 import com.example.banking.service.AccountService;
 
-// Web-layer test: real controller + real validation + real exception handler,
-// fake (mocked) service. No Spring context and no MongoDB needed.
+
 @ExtendWith(MockitoExtension.class)
 class AccountControllerTest {
 
@@ -47,8 +46,6 @@ class AccountControllerTest {
                 .build();
     }
 
-    // Principal is a single-method interface (getName()), so a lambda is enough here -
-    // no need to pull in Spring Security types just to fake "who is calling".
     private Principal principal(String userId) {
         return () -> userId;
     }

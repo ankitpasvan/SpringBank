@@ -24,19 +24,7 @@ import com.example.banking.repository.AccountRepository;
 import com.example.banking.repository.TransactionRepository;
 import com.example.banking.util.IdempotencyFingerprint;
 
-/**
- * Moves money from one account to another as a single all-or-nothing operation.
- *
- * WHY @Transactional: a transfer touches TWO accounts (debit one, credit the other) plus
- * TWO transaction records. Deposit/withdraw only ever touch one account, so a single locked
- * row update is enough there (see AccountBalanceRepository). Here, if the process crashed
- * right after debiting the sender but before crediting the receiver, money would simply
- * vanish - @Transactional (backed by Spring Boot's auto-configured JpaTransactionManager)
- * makes PostgreSQL itself undo the debit if anything later in this method throws.
- *
- * Unlike the previous MongoDB implementation, this needs no replica set: PostgreSQL
- * supports multi-statement transactions on any installation.
- */
+
 @Service
 public class TransferService {
 
@@ -59,17 +47,7 @@ public class TransferService {
         this.idempotencyService = idempotencyService;
     }
 
-    /**
-     * @param idempotencyKey optional. Null/blank -> behaves exactly as before: the transfer
-     *                       runs with no idempotency tracking. Non-blank -> a retry with the
-     *                       SAME key and the SAME transfer parameters replays the first
-     *                       attempt's result instead of moving money again; the same key with
-     *                       DIFFERENT parameters is rejected with 409 Conflict.
-     *
-     *                       The claim is scoped to (userId, idempotencyKey) by the database
-     *                       unique constraint, so one user can never replay another user's
-     *                       transfer result.
-     */
+
     @Transactional
     public TransferResponse transfer(String fromAccountId, String userId, String toAccountId, BigDecimal amount,
                                      String description, String idempotencyKey) {
@@ -89,10 +67,7 @@ public class TransferService {
             return replayIfFingerprintMatches(claim, fingerprint);
         }
 
-        // Same phase discipline as TransactionService.deposit(): only release the claim when
-        // the balance was never touched. Everything below runs in ONE database transaction,
-        // so any failure also rolls the debit/credit back - and the COMPLETED mark is part
-        // of that same transaction, so it can never be persisted without the money movement.
+
         boolean balanceMutated = false;
         try {
             TransferResponse response = executeTransfer(fromAccountId, userId, toAccountId, money, description);
@@ -112,13 +87,11 @@ public class TransferService {
 
     private TransferResponse executeTransfer(String fromAccountId, String userId, String toAccountId,
                                              BigDecimal money, String description) {
-        // Checked BEFORE touching the sender's balance: a missing receiver must never
-        // debit the sender in the first place.
+
         Account receiverAccount = accountRepository.findById(toAccountId)
                 .orElseThrow(() -> accountNotFound(toAccountId));
 
-        // Ownership + balance guard, exactly like TransactionService.withdraw - the sender
-        // must own fromAccountId and have enough balance, checked while the row is locked.
+
         Optional<Account> debitedSender = accountBalanceRepository.withdraw(fromAccountId, userId, money);
         if (debitedSender.isEmpty()) {
             if (!accountRepository.existsByIdAndUserId(fromAccountId, userId)) {
@@ -128,8 +101,7 @@ public class TransferService {
             throw new InsufficientFundsException();
         }
 
-        // The receiver does NOT need to be owned by this caller - anyone can be sent money.
-        // We use the receiver's OWN userId (just fetched above), never the sender's.
+
         Account creditedReceiver = accountBalanceRepository.deposit(toAccountId, receiverAccount.getUserId(), money)
                 .orElseThrow(() -> accountNotFound(toAccountId));
 
@@ -145,13 +117,7 @@ public class TransferService {
                 debitedSender.get().getBalance(), description, outgoing.getCreatedAt());
     }
 
-    // Replays the ORIGINAL response when the stored fingerprint matches this request's
-    // fingerprint; a mismatch means the client reused the key for a genuinely different
-    // request -> 409, never a silent replay.
-    //
-    // Transfer claims are always created WITH a fingerprint (this feature never existed
-    // without one), so there is no legacy backfill path like deposits have: a missing
-    // fingerprint fails closed instead of being reconstructed.
+
     private TransferResponse replayIfFingerprintMatches(IdempotencyRecord claim, String fingerprint) {
         String stored = claim.getRequestFingerprint();
         if (!fingerprint.equals(stored)) {
@@ -162,10 +128,7 @@ public class TransferService {
         return replay(claim);
     }
 
-    // Reconstructs the ORIGINAL response from the TRANSFER_OUT row that the first
-    // (successful) attempt already saved - no balance change, no new rows, just reads.
-    // toAccountId comes from the claim itself, because the Transaction row stores no
-    // destination account (that is exactly what IdempotencyRecord.toAccountId is for).
+
     private TransferResponse replay(IdempotencyRecord claim) {
         Transaction outgoing = transactionRepository.findById(claim.getResultTransactionId())
                 .orElseThrow(() -> new IllegalStateException(
@@ -175,7 +138,7 @@ public class TransferService {
                 outgoing.getCreatedAt());
     }
 
-    // Defensive check: the controller will validate too, but money code must not trust its callers.
+
     private BigDecimal normalize(BigDecimal amount) {
         if (amount == null || amount.signum() <= 0) {
             throw new IllegalArgumentException("Amount must be greater than zero");

@@ -21,8 +21,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.example.banking.model.Transaction;
 import com.example.banking.model.TransactionType;
 
-// Real persistence tests against an in-memory database: they prove the filters, date ranges,
-// sorting and pagination actually work, instead of only checking what query object we built.
+
 @DataJpaTest
 @Import(TransactionSearchRepository.class)
 class TransactionSearchRepositoryTest {

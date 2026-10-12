@@ -13,10 +13,7 @@ import jakarta.persistence.Table;
 
 import org.hibernate.annotations.UuidGenerator;
 
-/**
- * Bank account, stored in the "accounts" table.
- * The balance is a BigDecimal (never double) because money needs exact decimal math.
- */
+
 @Entity
 @Table(name = "accounts", indexes = {
         // fast lookup of all accounts of one user

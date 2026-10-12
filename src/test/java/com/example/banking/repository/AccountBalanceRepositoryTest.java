@@ -15,9 +15,7 @@ import org.springframework.context.annotation.Import;
 import com.example.banking.model.Account;
 import com.example.banking.model.AccountType;
 
-// Real persistence tests against an in-memory database: they prove the balance changes
-// are atomic and the ownership/balance guards actually hold, instead of only checking
-// what query object we built (as the old MongoTemplate-mock tests did).
+
 @DataJpaTest
 @Import(AccountBalanceRepository.class)
 class AccountBalanceRepositoryTest {

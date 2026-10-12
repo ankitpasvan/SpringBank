@@ -44,13 +44,7 @@ public class TransactionService {
         this.idempotencyService = idempotencyService;
     }
 
-    /**
-     * @param idempotencyKey optional. Null/blank -> behaves exactly as before this feature
-     *                       existed. Non-blank -> a retry with the SAME (userId, key) and the
-     *                       SAME normalized payload replays the first attempt's result instead
-     *                       of moving money again; the same key with a DIFFERENT amount or
-     *                       description is rejected with 409 Conflict.
-     */
+
     @Transactional
     public TransactionResponse deposit(String accountId, String userId, BigDecimal amount, String description,
                                        String idempotencyKey) {
@@ -65,11 +59,7 @@ public class TransactionService {
             return replayIfFingerprintMatches(claim, fingerprint);
         }
 
-        // The balance write and the ledger write below run inside the same database
-        // transaction (see @Transactional on this method), so a ledger failure after the
-        // balance moved rolls everything back. The fail-closed claim handling below is
-        // still kept as defense-in-depth for failures outside the transaction (e.g. the
-        // completion bookkeeping itself).
+
         boolean balanceMutated = false;
         try {
             Account updated = accountBalanceRepository.deposit(accountId, userId, money)
@@ -105,15 +95,12 @@ public class TransactionService {
             return replayIfFingerprintMatches(claim, fingerprint);
         }
 
-        // Same phase discipline as deposit(): only release the claim when the balance was
-        // never touched. A withdrawal that matched nothing mutates nothing, so the
-        // "no such account" vs "insufficient funds" distinction is unchanged.
+
         boolean balanceMutated = false;
         try {
             Optional<Account> updated = accountBalanceRepository.withdraw(accountId, userId, money);
             if (updated.isEmpty()) {
-                // The locked update matched nothing: either no such account, the account isn't
-                // yours, or balance < amount. Only the last case is "insufficient funds".
+
                 if (!accountRepository.existsByIdAndUserId(accountId, userId)) {
                     throw accountNotFound(accountId);
                 }
@@ -140,8 +127,7 @@ public class TransactionService {
                                                String description) {
         BigDecimal money = normalize(amount);
 
-        // Empty result covers BOTH "no such account" and "account exists but isn't yours" -
-        // both are reported as the same "not found" (see AccountBalanceRepository).
+
         Account updated = accountBalanceRepository.deposit(accountId, userId, money)
                 .orElseThrow(() -> accountNotFound(accountId));
 
@@ -154,8 +140,7 @@ public class TransactionService {
 
         Optional<Account> updated = accountBalanceRepository.withdraw(accountId, userId, money);
         if (updated.isEmpty()) {
-            // The locked update matched nothing: either no such account, the account isn't
-            // yours, or balance < amount. Only the last case is "insufficient funds".
+
             if (!accountRepository.existsByIdAndUserId(accountId, userId)) {
                 throw accountNotFound(accountId);
             }
@@ -166,14 +151,11 @@ public class TransactionService {
         return recordTransaction(accountId, TransactionType.WITHDRAWAL, money, updated.get(), description);
     }
 
-    // A COMPLETED record means this exact key finished before. Replay the original result only
-    // when the stored fingerprint matches this request's fingerprint; a mismatch means the
-    // client reused the key for a genuinely different request -> 409, never a silent replay.
+
     private TransactionResponse replayIfFingerprintMatches(IdempotencyRecord claim, String fingerprint) {
         String stored = claim.getRequestFingerprint();
         if (stored == null) {
-            // Legacy record written before fingerprinting existed: reconstruct the fingerprint
-            // from the immutable transaction row it points to, persist it, then enforce.
+
             stored = backfillFingerprint(claim);
         }
         if (!stored.equals(fingerprint)) {
@@ -188,15 +170,13 @@ public class TransactionService {
         Transaction transaction = transactionRepository.findById(claim.getResultTransactionId())
                 .orElseThrow(() -> new IllegalStateException(
                         "Idempotency record references a missing transaction: " + claim.getResultTransactionId()));
-        // The transaction row stores exactly the normalized fields the original request was
-        // fingerprinted with, so this reconstructs the identical fingerprint.
+
         String fingerprint = IdempotencyFingerprint.of(transaction.getAccountId(), transaction.getType(),
                 transaction.getAmount(), transaction.getDescription());
         return idempotencyService.ensureFingerprint(claim.getId(), fingerprint);
     }
 
-    // Reconstructs the ORIGINAL response from the Transaction row that the first (successful)
-    // attempt already saved - no balance change, no new Transaction, just a read.
+
     private TransactionResponse replay(IdempotencyRecord claim) {
         Transaction transaction = transactionRepository.findById(claim.getResultTransactionId())
                 .orElseThrow(() -> new IllegalStateException(
@@ -206,7 +186,7 @@ public class TransactionService {
 
     private TransactionResponse recordTransaction(String accountId, TransactionType type, BigDecimal amount,
                                                   Account updatedAccount, String description) {
-        // Note: the balance change above and this insert run in the same transaction now.
+
         Transaction saved = transactionRepository.save(
                 new Transaction(accountId, type, amount, updatedAccount.getBalance(), description));
         log.info("Transaction {} recorded: type={}, accountId={}, amount={}",
@@ -214,7 +194,7 @@ public class TransactionService {
         return TransactionResponse.from(saved);
     }
 
-    // Defensive check: the controller already validates, but money code must not trust its callers.
+
     private BigDecimal normalize(BigDecimal amount) {
         if (amount == null || amount.signum() <= 0) {
             throw new IllegalArgumentException("Amount must be greater than zero");

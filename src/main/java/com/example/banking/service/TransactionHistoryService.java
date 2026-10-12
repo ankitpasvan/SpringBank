@@ -33,10 +33,7 @@ public class TransactionHistoryService {
         this.transactionSearchRepository = transactionSearchRepository;
     }
 
-    /**
-     * Newest transactions first. Dates are calendar days in UTC: "from" is inclusive from 00:00,
-     * "to" is inclusive until the end of that day.
-     */
+
     public PageResponse<TransactionResponse> getHistory(String accountId, String userId, TransactionType type,
                                                         LocalDate from, LocalDate to, int page, int size) {
         if (page < 0) {

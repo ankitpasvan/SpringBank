@@ -4,10 +4,7 @@ import java.util.List;
 
 import org.springframework.data.domain.Page;
 
-/**
- * Stable JSON shape for every paginated endpoint.
- * (We do not return Spring's Page object directly: its JSON layout is not a stable API contract.)
- */
+
 public record PageResponse<T>(
         List<T> content,
         int page,

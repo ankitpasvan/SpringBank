@@ -35,14 +35,7 @@ import com.example.banking.repository.AccountRepository;
 import com.example.banking.repository.TransactionRepository;
 import com.example.banking.util.IdempotencyFingerprint;
 
-// Service-level idempotency tests for transfers, mirroring the deposit/withdraw
-// idempotency contract: same key + same params -> replay, same key + different
-// params -> 409, concurrent same key -> 409 "in progress".
-//
-// NOTE on concurrency: true multi-threaded safety lives inside
-// IdempotencyService.claim (unique-constraint race), which IdempotencyConcurrencyTest
-// already covers. What is tested here is the transfer-level wiring: while another
-// request holds the key, this request must not move money.
+
 @ExtendWith(MockitoExtension.class)
 class TransferIdempotencyTest {
 

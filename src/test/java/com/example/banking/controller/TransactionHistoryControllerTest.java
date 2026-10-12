@@ -30,7 +30,7 @@ import com.example.banking.exception.ResourceNotFoundException;
 import com.example.banking.model.TransactionType;
 import com.example.banking.service.TransactionHistoryService;
 
-// Web-layer test: real controller + real exception handler, fake (mocked) service.
+
 @ExtendWith(MockitoExtension.class)
 class TransactionHistoryControllerTest {
 
@@ -48,8 +48,7 @@ class TransactionHistoryControllerTest {
                 .build();
     }
 
-    // Principal is a single-method interface (getName()), so a lambda is enough here -
-    // no need to pull in Spring Security types just to fake "who is calling".
+
     private Principal principal(String userId) {
         return () -> userId;
     }

@@ -11,9 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import com.example.banking.exception.InvalidTokenException;
 
-// No mocks anywhere here: every test uses a REAL JwtService with REAL jjwt token
-// generation and parsing, because the whole point of this class is cryptographic
-// correctness, which a mock cannot verify.
+
 class JwtServiceTest {
 
     private static final String USER_ID = "user-123";

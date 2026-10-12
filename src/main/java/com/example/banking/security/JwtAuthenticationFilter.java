@@ -17,26 +17,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-/**
- * Runs once per request, before Spring Security decides permit/deny.
- *
- * WHAT: reads "Authorization: Bearer <token>", validates it with the existing JwtService,
- * and if valid, tells Spring Security "this request is authenticated as this userId" by
- * putting an Authentication into the SecurityContext.
- *
- * WHY here and not in a controller: SecurityConfig's authorizeHttpRequests() decides
- * permit/deny BEFORE any controller runs, so authentication must be established earlier
- * in the filter chain - that is exactly what a Filter is for.
- *
- * Three outcomes per request:
- *   1) no Authorization header at all -> do nothing and continue the chain unauthenticated.
- *      SecurityConfig then either allows it through (public endpoint) or rejects it with 401
- *      via JwtAuthenticationEntryPoint (protected endpoint).
- *   2) a "Bearer" token that IS valid -> set the SecurityContext, continue the chain.
- *   3) a "Bearer" token that is NOT valid (expired/tampered/malformed) -> reject immediately
- *      with 401 using JwtService's own reason, instead of silently treating it like "no
- *      token" - a client that sent a bad token deserves a specific error, not a generic one.
- */
+
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 

@@ -6,9 +6,7 @@ import java.time.Instant;
 import com.example.banking.model.Account;
 import com.example.banking.model.AccountType;
 
-/**
- * JSON returned to the client for an account.
- */
+
 public record AccountResponse(
         String id,
         String accountNumber,

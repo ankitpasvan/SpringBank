@@ -14,12 +14,7 @@ import com.example.banking.dto.UpdateProfileRequest;
 import com.example.banking.dto.UserResponse;
 import com.example.banking.service.UserService;
 
-/**
- * Current-user profile endpoints. Both require authentication (SecurityConfig permits
- * only /api/auth/register and /api/auth/login without a token), and the user id is
- * always taken from the JWT via Principal - never from a request parameter - so a
- * user can only read or change their own profile.
- */
+
 @RestController
 @RequestMapping("/api/users")
 public class UserController {

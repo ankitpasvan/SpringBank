@@ -12,14 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-/**
- * Writes a 401 response in the SAME JSON shape (ErrorResponse) that GlobalExceptionHandler
- * uses for every other error in this API.
- *
- * WHY this class exists: an exception thrown inside a servlet Filter runs BEFORE Spring MVC's
- * exception-handling machinery, so @RestControllerAdvice (GlobalExceptionHandler) never sees
- * it - a filter has to write the HTTP response itself, by hand, instead of just throwing.
- */
+
 final class SecurityResponseWriter {
 
     private SecurityResponseWriter() {

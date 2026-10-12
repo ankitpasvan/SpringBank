@@ -14,24 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
-/**
- * End-to-end test of the REAL Spring Security filter chain wired by SecurityConfig.
- *
- * Unlike the standalone MockMvc used in every other *ControllerTest in this project (which
- * builds a single controller by hand and skips Spring Security entirely), the MockMvc here
- * is built from the FULL Spring context via @AutoConfigureMockMvc, so requests actually pass
- * through JwtAuthenticationFilter and the authorizeHttpRequests() rules from SecurityConfig -
- * this is the only way to prove that wiring is correct end to end.
- *
- * (Spring Boot 4 no longer auto-configures TestRestTemplate for @SpringBootTest, and it is
- * being deprecated in favour of RestTestClient in 4.2 - @AutoConfigureMockMvc avoids both of
- * those moving parts while still exercising the real filter chain.)
- *
- * Every request body below is deliberately invalid/minimal so Bean Validation rejects it
- * BEFORE any controller reaches the database. (The test context uses an in-memory H2
- * database - see src/test/resources/application.properties - so even a request that did
- * reach a repository would hit H2, never a real PostgreSQL.)
- */
+
 @SpringBootTest
 @AutoConfigureMockMvc
 
@@ -92,9 +75,7 @@ class SecurityFilterChainIntegrationTest {
         JwtService issuer = new JwtService(TEST_SECRET, 3_600_000L);
         String token = issuer.generateToken("user-123", "ankit@example.com");
 
-        // {} fails CreateAccountRequest validation (userId/accountType required) -> 400.
-        // Getting 400 (not 401/403) PROVES the token authenticated successfully and the
-        // request reached the controller's validation layer, without ever touching the database.
+
         mockMvc.perform(post("/api/accounts")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)

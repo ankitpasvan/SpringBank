@@ -30,8 +30,7 @@ import com.example.banking.exception.InvalidCredentialsException;
 import com.example.banking.security.JwtService;
 import com.example.banking.service.UserService;
 
-// Web-layer test: real controller + real validation + real exception handler,
-// fake (mocked) service and JWT service. No Spring context and no MongoDB needed.
+
 @ExtendWith(MockitoExtension.class)
 class AuthControllerTest {
 

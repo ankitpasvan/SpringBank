@@ -36,9 +36,7 @@ public class AuthController {
 
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request) {
-        // UserService.verifyCredentials throws InvalidCredentialsException (-> 401, see
-        // GlobalExceptionHandler) for BOTH an unknown email and a wrong password, with the
-        // exact same message, so this endpoint never reveals which emails are registered.
+
         UserResponse user = userService.verifyCredentials(request.email(), request.password());
         String token = jwtService.generateToken(user.id(), user.email());
         return new LoginResponse(token, user);

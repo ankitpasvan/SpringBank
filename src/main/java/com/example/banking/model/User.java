@@ -9,10 +9,7 @@ import jakarta.persistence.Table;
 
 import org.hibernate.annotations.UuidGenerator;
 
-/**
- * Application user, stored in the "users" table.
- * Only the password HASH is stored, never the plaintext password.
- */
+
 @Entity
 @Table(name = "users")
 public class User {

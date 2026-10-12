@@ -9,14 +9,7 @@ import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 
-/**
- * Swagger/OpenAPI setup: adds a JWT "Authorize" button to the Swagger UI so the documented
- * API can actually be tried with a real token. Flow: POST /api/auth/login, copy the token,
- * click "Authorize" in the UI, enter "Bearer &lt;token&gt;".
- *
- * The Swagger endpoints themselves (/swagger-ui.html, /v3/api-docs) are public - see
- * SecurityConfig - but every /api/** endpoint still requires the JWT.
- */
+
 @Configuration
 public class OpenApiConfig {
 

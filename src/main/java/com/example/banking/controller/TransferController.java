@@ -27,12 +27,7 @@ public class TransferController {
         this.transferService = transferService;
     }
 
-    /**
-     * @param idempotencyKey optional, consistent with deposit/withdraw. When supplied, a
-     *                       retry with the same key and identical parameters replays the
-     *                       first transfer instead of moving money again; the same key with
-     *                       different parameters is rejected with 409 Conflict.
-     */
+
     @PostMapping("/transfer")
     @ResponseStatus(HttpStatus.CREATED)
     public TransferResponse transfer(Principal principal, @PathVariable("accountId") String accountId,

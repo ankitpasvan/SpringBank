@@ -13,28 +13,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.example.banking.model.Account;
 
-/**
- * Changes an account balance atomically using a pessimistic row lock (SELECT ... FOR UPDATE).
- *
- * Why not "read account, change balance in Java, save"? Two requests at the same moment
- * would both read the old balance and one update would be lost (race condition).
- * With the row locked, the database serializes concurrent writers: the second one waits
- * for the first one's transaction to finish, then sees the updated balance. No update
- * can be lost, and the balance can never go negative.
- *
- * The ownership check (userId) happens AFTER the lock is acquired but BEFORE any change,
- * so a caller can never observe or race against "is this mine" as a distinct step.
- */
+
 @Repository
 public class AccountBalanceRepository {
 
     @PersistenceContext
     private EntityManager entityManager;
 
-    /**
-     * Adds the amount. Returns the updated account, or empty if no account with this id
-     * AND this owner exists.
-     */
+
     @Transactional
     public Optional<Account> deposit(String accountId, String userId, BigDecimal amount) {
         Account account = findOwnedForUpdate(accountId, userId);
@@ -64,11 +50,7 @@ public class AccountBalanceRepository {
         return Optional.of(account);
     }
 
-    /**
-     * Loads the account with a write lock, or returns null when there is no such account
-     * or it is not owned by userId. Callers treat null as "not found" without distinguishing
-     * the two cases (see AccountService for why).
-     */
+
     private Account findOwnedForUpdate(String accountId, String userId) {
         Account account = entityManager.find(Account.class, accountId, LockModeType.PESSIMISTIC_WRITE);
         if (account == null || !account.getUserId().equals(userId)) {

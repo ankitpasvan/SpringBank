@@ -114,15 +114,7 @@ Content-Type: application/json
 {"amount":10.00}
 
 ### ===== MONEY TRANSFER =====
-### IMPORTANT: a transfer runs inside a MongoDB multi-document transaction
-### (@Transactional + MongoTransactionManager, see MongoTransactionConfig.java).
-### Multi-document transactions require a REPLICA SET - they do NOT work against a
-### single standalone mongod. The real atomicity/rollback guarantee (if the deposit
-### step were to fail, the earlier withdraw must be undone) can only be observed when
-### this app is connected to MongoDB Atlas (a replica set by default) or to a local
-### MongoDB that was itself started with a replica set. Against a plain standalone
-### local mongod, these requests may fail outright with a transaction-not-supported
-### error - that is expected and is a MongoDB limitation, not an application bug.
+
 
 ### 18. User B needs their own account to receive money
 POST http://localhost:8080/api/accounts
