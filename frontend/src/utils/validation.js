@@ -8,6 +8,15 @@ export function validateName(name) {
     return ''
 }
 
+// Register only: backend RegisterRequest caps name at 50 chars
+// (UpdateProfileRequest allows 100, so validateName stays at 100 for profile).
+export function validateRegisterName(name) {
+    if (!name || !name.trim()) return 'Name is required.'
+    if (name.trim().length < 2) return 'Name must be at least 2 characters.'
+    if (name.trim().length > 50) return 'Name must be at most 50 characters.'
+    return ''
+}
+
 export function validateEmail(email) {
     if (!email || !email.trim()) return 'Email is required.'
     if (email.length > 100) return 'Email must be at most 100 characters.'

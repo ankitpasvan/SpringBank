@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext.jsx'
 import { useToast } from '@/context/ToastContext.jsx'
 import { getErrorMessage, getErrorStatus, getFieldErrors } from '@/lib/api'
-import { validateEmail, validateName, validatePassword } from '@/utils/validation'
+import { validateEmail, validatePassword, validateRegisterName } from '@/utils/validation'
 import Button from '@/components/common/Button.jsx'
 import Input from '@/components/common/Input.jsx'
 import Alert from '@/components/common/Alert.jsx'
@@ -33,7 +33,7 @@ function RegisterForm() {
     const handleSubmit = async (e) => {
         e.preventDefault()
         const next = {}
-        const nameError = validateName(form.name)
+        const nameError = validateRegisterName(form.name)
         if (nameError) next.name = nameError
         const emailError = validateEmail(form.email)
         if (emailError) next.email = emailError
@@ -121,7 +121,7 @@ function RegisterForm() {
                         autoComplete="new-password"
                         placeholder="Repeat your password"
                         value={form.confirmPassword}
-                        onChange={setField('confirmPassword')}
+                        onChange={(e) => setForm((f) => ({ ...f, confirmPassword: e.target.value }))}
                         error={errors.confirmPassword}
                     />
                     <Button type="submit" loading={submitting} className="w-full" size="lg">
