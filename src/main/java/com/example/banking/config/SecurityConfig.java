@@ -1,4 +1,3 @@
-
 package com.example.banking.config;
 
 import org.springframework.context.annotation.Bean;
@@ -42,6 +41,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/register",
                                 "/api/auth/login",
+                                "/api/rates/**",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/v3/api-docs",
